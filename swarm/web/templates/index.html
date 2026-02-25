@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Swarm — Home{% endblock %}
+
+{% block content %}
+<div class="home-hero">
+  <h1>Welcome to Swarm</h1>
+  <p>Your local AI orchestration agent</p>
+</div>
+
+<div class="cards-grid">
+
+  <a href="/chat" class="card">
+    <div class="card-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+      </svg>
+    </div>
+    <h3>New Chat</h3>
+    <p>Start a conversation with the agent</p>
+  </a>
+
+  <a href="/config" class="card">
+    <div class="card-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/>
+        <path d="M12 2v2M12 20v2M2 12h2M20 12h2"/>
+      </svg>
+    </div>
+    <h3>LLM Config</h3>
+    <p>Manage providers, models and API keys</p>
+  </a>
+
+  <a href="/memory" class="card">
+    <div class="card-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <ellipse cx="12" cy="5" rx="9" ry="3"/>
+        <path d="M3 5v14a9 3 0 0 0 18 0V5"/>
+        <path d="M3 12a9 3 0 0 0 18 0"/>
+      </svg>
+    </div>
+    <h3>Memory</h3>
+    <p>Browse long-term and daily notes</p>
+  </a>
+
+  <a href="/scheduler" class="card">
+    <div class="card-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"/>
+        <polyline points="12 6 12 12 16 14"/>
+      </svg>
+    </div>
+    <h3>Scheduler</h3>
+    <p>View and manage cron jobs</p>
+  </a>
+
+</div>
+{% endblock %}

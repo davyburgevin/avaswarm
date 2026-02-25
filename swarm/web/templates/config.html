@@ -1,0 +1,257 @@
+{% extends "base.html" %}
+{% block title %}Swarm — LLM Config{% endblock %}
+{% set back_url = "/" %}
+
+{% block content %}
+<div class="form-page">
+  <h2>LLM Configuration</h2>
+  <p class="subtitle">Select a provider, enter your credentials and test the connection before saving.</p>
+
+  <!-- Provider selector -->
+  <div class="section-title">Provider</div>
+
+  <div class="field">
+    <label for="provider">LLM Provider</label>
+    <select id="provider" onchange="onProviderChange()">
+      <option value="openai"          {% if current.provider=='openai'          %}selected{% endif %}>OpenAI (GPT-4o, GPT-4, …)</option>
+      <option value="anthropic"       {% if current.provider=='anthropic'       %}selected{% endif %}>Anthropic (Claude 3.x)</option>
+      <option value="openrouter"      {% if current.provider=='openrouter'      %}selected{% endif %}>OpenRouter (multi-model)</option>
+      <option value="github_copilot"  {% if current.provider=='github_copilot'  %}selected{% endif %}>GitHub Copilot</option>
+      <option value="vllm"            {% if current.provider=='vllm'            %}selected{% endif %}>vLLM / Local model</option>
+    </select>
+  </div>
+
+  <!-- Model -->
+  <div class="section-title">Model</div>
+  <div class="row-2">
+    <div class="field">
+      <label for="model">Model name</label>
+      <input id="model" type="text" placeholder="e.g. gpt-4o" value="{{ current.model }}"/>
+    </div>
+    <div class="field">
+      <label for="context_window">Context window</label>
+      <select id="context_window">
+        <option value="4096"   {% if current.context_window|int == 4096   %}selected{% endif %}>4k  — très petits modèles</option>
+        <option value="8192"   {% if current.context_window|int == 8192   %}selected{% endif %}>8k  — modèles 8B standard</option>
+        <option value="16000"  {% if current.context_window|int == 16000 or not current.context_window %}selected{% endif %}>16k — recommandé (défaut)</option>
+        <option value="32768"  {% if current.context_window|int == 32768  %}selected{% endif %}>32k — grands modèles</option>
+        <option value="65536"  {% if current.context_window|int == 65536  %}selected{% endif %}>64k — very large context</option>
+        <option value="131072" {% if current.context_window|int == 131072 %}selected{% endif %}>128k — max (GPT-4o, Claude…)</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Credentials — shown/hidden per provider -->
+  <div class="section-title">Credentials</div>
+
+  <div id="cred-openai">
+    <div class="field">
+      <label>OpenAI API Key</label>
+      <input id="openai_api_key" type="password" placeholder="sk-..." value="{{ current.openai_api_key }}"/>
+    </div>
+    <div class="field">
+      <label>Base URL <span style="color:var(--muted);font-size:.8em">(optional — for Azure/proxy)</span></label>
+      <input id="openai_base_url" type="text" placeholder="https://api.openai.com/v1" value="{{ current.openai_base_url }}"/>
+    </div>
+  </div>
+
+  <div id="cred-anthropic" style="display:none">
+    <div class="field">
+      <label>Anthropic API Key</label>
+      <input id="anthropic_api_key" type="password" placeholder="sk-ant-..." value="{{ current.anthropic_api_key }}"/>
+    </div>
+  </div>
+
+  <div id="cred-openrouter" style="display:none">
+    <div class="field">
+      <label>OpenRouter API Key</label>
+      <input id="openrouter_api_key" type="password" placeholder="sk-or-..." value="{{ current.openrouter_api_key }}"/>
+    </div>
+    <div class="field">
+      <label>Base URL</label>
+      <input id="openrouter_base_url" type="text" placeholder="https://openrouter.ai/api/v1" value="{{ current.openrouter_base_url }}"/>
+    </div>
+  </div>
+
+  <div id="cred-github_copilot" style="display:none">
+    <div class="field">
+      <label>GitHub OAuth Token</label>
+      <input id="github_copilot_token" type="password" placeholder="ghu_..." value="{{ current.github_copilot_token }}"/>
+    </div>
+  </div>
+
+  <div id="cred-vllm" style="display:none">
+    <div class="field">
+      <label>vLLM Base URL</label>
+      <input id="vllm_base_url" type="text" placeholder="http://localhost:8000/v1" value="{{ current.vllm_base_url }}"/>
+    </div>
+  </div>
+
+  <!-- Test result -->
+  <div class="section-title">Connection test</div>
+  <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+    <button class="btn btn-secondary" onclick="testConnection()">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12A10 10 0 1 1 12 2"/><polyline points="22 2 22 8 16 8"/></svg>
+      Test connection
+    </button>
+    <span class="status-pill hidden" id="test-status"></span>
+  </div>
+
+  <!-- Debug log panel -->
+  <div id="debug-panel" style="display:none;margin-top:16px">
+    <div style="font-size:.78rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Connection log</div>
+    <pre id="debug-log" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px;font-size:.8rem;line-height:1.7;color:var(--muted);overflow-x:auto;white-space:pre-wrap;max-height:260px;overflow-y:auto"></pre>
+  </div>
+
+  <!-- Actions -->
+  <div class="actions">
+    <button class="btn btn-primary" onclick="saveConfig()">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+      Save settings
+    </button>
+    <a href="/" class="btn btn-secondary">Cancel</a>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const PROVIDERS = ['openai','anthropic','openrouter','github_copilot','vllm'];
+
+function onProviderChange(){
+  const v = document.getElementById('provider').value;
+  const models = {
+    openai: 'gpt-4o',
+    anthropic: 'claude-3-5-sonnet-20241022',
+    openrouter: 'openai/gpt-4o',
+    github_copilot: 'gpt-4o',
+    vllm: 'local-model',
+  };
+  // Show/hide cred blocks
+  PROVIDERS.forEach(p => {
+    const el = document.getElementById('cred-'+p);
+    if(el) el.style.display = (p===v) ? 'block' : 'none';
+  });
+  // Suggest model
+  const m = document.getElementById('model');
+  if(!m.value || Object.values(models).includes(m.value)){
+    m.value = models[v] || '';
+  }
+  clearStatus();
+}
+
+function clearStatus(){
+  const s = document.getElementById('test-status');
+  s.className = 'status-pill hidden';
+  s.textContent = '';
+}
+
+function buildPayload(){
+  const p = document.getElementById('provider').value;
+  const fields = {};
+  document.querySelectorAll('#cred-'+p+' input').forEach(inp => {
+    fields[inp.id] = inp.value;
+  });
+  return {
+    provider: p,
+    model: document.getElementById('model').value,
+    context_window: parseInt(document.getElementById('context_window').value),
+    ...fields,
+  };
+}
+
+async function testConnection(){
+  const s    = document.getElementById('test-status');
+  const panel = document.getElementById('debug-panel');
+  const logEl = document.getElementById('debug-log');
+
+  s.className = 'status-pill loading';
+  s.textContent = 'Testing…';
+  panel.style.display = 'block';
+  logEl.textContent = 'Sending request…\n';
+
+  try {
+    const r = await fetch('/api/config/test', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(buildPayload()),
+    });
+    const d = await r.json();
+
+    // Show logs
+    if(d.logs && d.logs.length){
+      logEl.textContent = d.logs.join('\n');
+    }
+
+    if(d.ok){
+      s.className = 'status-pill ok';
+      s.textContent = 'Connected — ' + (d.model || '');
+      showToast('Connection successful — saving settings…', 'ok');
+      logEl.textContent += '\n✓ ' + (d.reply || '');
+      // Auto-apply: save config to the live agent immediately
+      try {
+        const rs = await fetch('/api/config', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify(buildPayload()),
+        });
+        const ds = await rs.json();
+        if(ds.ok){
+          logEl.textContent += '\n✓ Settings applied to live agent.';
+          showToast('Settings saved & applied', 'ok');
+        } else {
+          logEl.textContent += '\n⚠ Save failed: ' + (ds.error || '');
+        }
+      } catch(se){
+        logEl.textContent += '\n⚠ Auto-save error: ' + se.message;
+      }
+    } else {
+      s.className = 'status-pill error';
+      s.textContent = d.error ? d.error.slice(0,80) : 'Failed';
+      showToast('Connection failed', 'error');
+      if(d.detail){
+        logEl.textContent += '\n\n--- Traceback ---\n' + d.detail;
+      }
+    }
+  } catch(e){
+    s.className = 'status-pill error';
+    s.textContent = 'Network error';
+    logEl.textContent += '\nNetwork error: '+e.message;
+    showToast('Network error: '+e.message, 'error');
+  }
+}
+
+async function saveConfig(){
+  try {
+    const r = await fetch('/api/config', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(buildPayload()),
+    });
+    const d = await r.json();
+    if(d.ok){
+      showToast('Settings saved', 'ok');
+      setTimeout(()=>window.location='/', 900);
+    } else {
+      showToast(d.error||'Save failed', 'error');
+    }
+  } catch(e){
+    showToast('Error: '+e.message, 'error');
+  }
+}
+
+// Init: show correct credential block
+onProviderChange();
+// But restore the originally selected provider
+document.getElementById('provider').dispatchEvent(new Event('change'));
+// Actually keep current value from server — re-show right block
+(function(){
+  const p = document.getElementById('provider').value;
+  PROVIDERS.forEach(pr => {
+    const el = document.getElementById('cred-'+pr);
+    if(el) el.style.display = (pr===p) ? 'block' : 'none';
+  });
+})();
+</script>
+{% endblock %}
