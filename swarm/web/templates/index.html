@@ -3,7 +3,12 @@
 
 {% block content %}
 <div class="home-hero">
-  <h1>Welcome to Swarm</h1>
+  {% if first_name %}
+    <h1>Hello {{ first_name }}</h1>
+    <h2>Welcome to Swarm</h2>
+  {% else %}
+    <h1>Welcome to Swarm</h1>
+  {% endif %}
   <p>Your local AI orchestration agent</p>
 </div>
 

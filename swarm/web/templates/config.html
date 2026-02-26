@@ -3,115 +3,136 @@
 {% set back_url = "/" %}
 
 {% block content %}
-<div class="form-page">
-  <h2>LLM Configuration</h2>
-  <p class="subtitle">Select a provider, enter your credentials and test the connection before saving.</p>
-
-  <!-- Provider selector -->
-  <div class="section-title">Provider</div>
-
-  <div class="field">
-    <label for="provider">LLM Provider</label>
-    <select id="provider" onchange="onProviderChange()">
-      <option value="openai"          {% if current.provider=='openai'          %}selected{% endif %}>OpenAI (GPT-4o, GPT-4, …)</option>
-      <option value="anthropic"       {% if current.provider=='anthropic'       %}selected{% endif %}>Anthropic (Claude 3.x)</option>
-      <option value="openrouter"      {% if current.provider=='openrouter'      %}selected{% endif %}>OpenRouter (multi-model)</option>
-      <option value="github_copilot"  {% if current.provider=='github_copilot'  %}selected{% endif %}>GitHub Copilot</option>
-      <option value="vllm"            {% if current.provider=='vllm'            %}selected{% endif %}>vLLM / Local model</option>
-    </select>
-  </div>
-
-  <!-- Model -->
-  <div class="section-title">Model</div>
-  <div class="row-2">
-    <div class="field">
-      <label for="model">Model name</label>
-      <input id="model" type="text" placeholder="e.g. gpt-4o" value="{{ current.model }}"/>
+<div class="page-with-sidebar">
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <h3>LLM Config</h3>
     </div>
-    <div class="field">
-      <label for="context_window">Context window</label>
-      <select id="context_window">
-        <option value="4096"   {% if current.context_window|int == 4096   %}selected{% endif %}>4k  — très petits modèles</option>
-        <option value="8192"   {% if current.context_window|int == 8192   %}selected{% endif %}>8k  — modèles 8B standard</option>
-        <option value="16000"  {% if current.context_window|int == 16000 or not current.context_window %}selected{% endif %}>16k — recommandé (défaut)</option>
-        <option value="32768"  {% if current.context_window|int == 32768  %}selected{% endif %}>32k — grands modèles</option>
-        <option value="65536"  {% if current.context_window|int == 65536  %}selected{% endif %}>64k — very large context</option>
-        <option value="131072" {% if current.context_window|int == 131072 %}selected{% endif %}>128k — max (GPT-4o, Claude…)</option>
-      </select>
+    <div style="padding:12px">
+      <button class="btn btn-secondary" onclick="showList()">LLM List</button>
+      <button class="btn btn-primary" onclick="showAdd()">Add LLM</button>
     </div>
-  </div>
 
-  <!-- Credentials — shown/hidden per provider -->
-  <div class="section-title">Credentials</div>
-
-  <div id="cred-openai">
-    <div class="field">
-      <label>OpenAI API Key</label>
-      <input id="openai_api_key" type="password" placeholder="sk-..." value="{{ current.openai_api_key }}"/>
+    <div id="llm-list" style="display:none;padding:12px;">
+      <div style="font-size:.85rem;color:var(--muted);margin-bottom:8px">Saved LLMs</div>
+      <ul id="configs-ul" style="list-style:none;padding:0;margin:0"></ul>
     </div>
-    <div class="field">
-      <label>Base URL <span style="color:var(--muted);font-size:.8em">(optional — for Azure/proxy)</span></label>
-      <input id="openai_base_url" type="text" placeholder="https://api.openai.com/v1" value="{{ current.openai_base_url }}"/>
+  </aside>
+
+  <main class="config-main">
+    <div id="top-panel" class="top-panel" style="width:100%;max-width:820px;margin-bottom:18px"></div>
+    <div class="form-page" id="add-form" style="display:none">
+      <h2>LLM Configuration</h2>
+      <p class="subtitle">Select a provider, enter your credentials and test the connection before saving.</p>
+
+      <!-- Provider selector -->
+      <div class="section-title">Provider</div>
+
+      <div class="field">
+        <label for="provider">LLM Provider</label>
+        <select id="provider" onchange="onProviderChange()">
+          <option value="openai"          {% if current.provider=='openai'          %}selected{% endif %}>OpenAI (GPT-4o, GPT-4, …)</option>
+          <option value="anthropic"       {% if current.provider=='anthropic'       %}selected{% endif %}>Anthropic (Claude 3.x)</option>
+          <option value="openrouter"      {% if current.provider=='openrouter'      %}selected{% endif %}>OpenRouter (multi-model)</option>
+          <option value="github_copilot"  {% if current.provider=='github_copilot'  %}selected{% endif %}>GitHub Copilot</option>
+          <option value="vllm"            {% if current.provider=='vllm'            %}selected{% endif %}>vLLM / Local model</option>
+        </select>
+      </div>
+
+      <!-- Model -->
+      <div class="section-title">Model</div>
+      <div class="row-2">
+        <div class="field">
+          <label for="model">Model name</label>
+          <input id="model" type="text" placeholder="e.g. gpt-4o" value="{{ current.model }}"/>
+        </div>
+        <div class="field">
+          <label for="context_window">Context window</label>
+          <select id="context_window">
+            <option value="4096"   {% if current.context_window|int == 4096   %}selected{% endif %}>4k  — très petits modèles</option>
+            <option value="8192"   {% if current.context_window|int == 8192   %}selected{% endif %}>8k  — modèles 8B standard</option>
+            <option value="16000"  {% if current.context_window|int == 16000 or not current.context_window %}selected{% endif %}>16k — recommandé (défaut)</option>
+            <option value="32768"  {% if current.context_window|int == 32768  %}selected{% endif %}>32k — grands modèles</option>
+            <option value="65536"  {% if current.context_window|int == 65536  %}selected{% endif %}>64k — very large context</option>
+            <option value="131072" {% if current.context_window|int == 131072 %}selected{% endif %}>128k — max (GPT-4o, Claude…)</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Credentials — shown/hidden per provider -->
+      <div class="section-title">Credentials</div>
+
+      <div id="cred-openai">
+        <div class="field">
+          <label>OpenAI API Key</label>
+          <input id="openai_api_key" type="password" placeholder="sk-..." value="{{ current.openai_api_key }}"/>
+        </div>
+        <div class="field">
+          <label>Base URL <span style="color:var(--muted);font-size:.8em">(optional — for Azure/proxy)</span></label>
+          <input id="openai_base_url" type="text" placeholder="https://api.openai.com/v1" value="{{ current.openai_base_url }}"/>
+        </div>
+      </div>
+
+      <div id="cred-anthropic" style="display:none">
+        <div class="field">
+          <label>Anthropic API Key</label>
+          <input id="anthropic_api_key" type="password" placeholder="sk-ant-..." value="{{ current.anthropic_api_key }}"/>
+        </div>
+      </div>
+
+      <div id="cred-openrouter" style="display:none">
+        <div class="field">
+          <label>OpenRouter API Key</label>
+          <input id="openrouter_api_key" type="password" placeholder="sk-or-..." value="{{ current.openrouter_api_key }}"/>
+        </div>
+        <div class="field">
+          <label>Base URL</label>
+          <input id="openrouter_base_url" type="text" placeholder="https://openrouter.ai/api/v1" value="{{ current.openrouter_base_url }}"/>
+        </div>
+      </div>
+
+      <div id="cred-github_copilot" style="display:none">
+        <div class="field">
+          <label>GitHub OAuth Token</label>
+          <input id="github_copilot_token" type="password" placeholder="ghu_..." value="{{ current.github_copilot_token }}"/>
+        </div>
+      </div>
+
+      <div id="cred-vllm" style="display:none">
+        <div class="field">
+          <label>vLLM Base URL</label>
+          <input id="vllm_base_url" type="text" placeholder="http://localhost:8000/v1" value="{{ current.vllm_base_url }}"/>
+        </div>
+      </div>
+
+      <!-- Test result -->
+      <div class="section-title">Connection test</div>
+      <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+        <button class="btn btn-secondary" onclick="testConnection()">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12A10 10 0 1 1 12 2"/><polyline points="22 2 22 8 16 8"/></svg>
+          Test connection
+        </button>
+        <span class="status-pill hidden" id="test-status"></span>
+      </div>
+
+      <!-- Debug log panel -->
+      <div id="debug-panel" style="display:none;margin-top:16px">
+        <div style="font-size:.78rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Connection log</div>
+        <pre id="debug-log" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px;font-size:.8rem;line-height:1.7;color:var(--muted);overflow-x:auto;white-space:pre-wrap;max-height:260px;overflow-y:auto"></pre>
+      </div>
+
+      <!-- Actions -->
+      <div class="actions">
+        <button class="btn btn-primary" onclick="saveConfig()">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+          Save settings
+        </button>
+        <a href="/" class="btn btn-secondary">Cancel</a>
+      </div>
+
     </div>
-  </div>
-
-  <div id="cred-anthropic" style="display:none">
-    <div class="field">
-      <label>Anthropic API Key</label>
-      <input id="anthropic_api_key" type="password" placeholder="sk-ant-..." value="{{ current.anthropic_api_key }}"/>
-    </div>
-  </div>
-
-  <div id="cred-openrouter" style="display:none">
-    <div class="field">
-      <label>OpenRouter API Key</label>
-      <input id="openrouter_api_key" type="password" placeholder="sk-or-..." value="{{ current.openrouter_api_key }}"/>
-    </div>
-    <div class="field">
-      <label>Base URL</label>
-      <input id="openrouter_base_url" type="text" placeholder="https://openrouter.ai/api/v1" value="{{ current.openrouter_base_url }}"/>
-    </div>
-  </div>
-
-  <div id="cred-github_copilot" style="display:none">
-    <div class="field">
-      <label>GitHub OAuth Token</label>
-      <input id="github_copilot_token" type="password" placeholder="ghu_..." value="{{ current.github_copilot_token }}"/>
-    </div>
-  </div>
-
-  <div id="cred-vllm" style="display:none">
-    <div class="field">
-      <label>vLLM Base URL</label>
-      <input id="vllm_base_url" type="text" placeholder="http://localhost:8000/v1" value="{{ current.vllm_base_url }}"/>
-    </div>
-  </div>
-
-  <!-- Test result -->
-  <div class="section-title">Connection test</div>
-  <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
-    <button class="btn btn-secondary" onclick="testConnection()">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12A10 10 0 1 1 12 2"/><polyline points="22 2 22 8 16 8"/></svg>
-      Test connection
-    </button>
-    <span class="status-pill hidden" id="test-status"></span>
-  </div>
-
-  <!-- Debug log panel -->
-  <div id="debug-panel" style="display:none;margin-top:16px">
-    <div style="font-size:.78rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Connection log</div>
-    <pre id="debug-log" style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px;font-size:.8rem;line-height:1.7;color:var(--muted);overflow-x:auto;white-space:pre-wrap;max-height:260px;overflow-y:auto"></pre>
-  </div>
-
-  <!-- Actions -->
-  <div class="actions">
-    <button class="btn btn-primary" onclick="saveConfig()">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-      Save settings
-    </button>
-    <a href="/" class="btn btn-secondary">Cancel</a>
-  </div>
-
+  </main>
+  <div style="clear:both"></div>
 </div>
 {% endblock %}
 
@@ -253,5 +274,118 @@ document.getElementById('provider').dispatchEvent(new Event('change'));
     if(el) el.style.display = (pr===p) ? 'block' : 'none';
   });
 })();
+</script>
+<script>
+// --- Sidebar / saved configs UI ---
+async function loadConfigs(){
+  try{
+    const r = await fetch('/api/config');
+    const d = await r.json();
+    let configs = d.configs || [];
+    // If no saved configs, show the current runtime config as a "Current" entry
+    if((!configs || configs.length===0) && d.provider){
+      configs = [{ name: 'Current', provider: d.provider, model: d.model }];
+    }
+    renderConfigs(configs, d.active);
+  }catch(e){
+    console.error('loadConfigs', e);
+  }
+}
+
+function renderConfigs(configs, active){
+  const ul = document.getElementById('configs-ul');
+  ul.innerHTML = '';
+  if(!configs || configs.length===0){
+    ul.innerHTML = '<li style="color:var(--muted)">No saved LLMs</li>';
+    return;
+  }
+  configs.forEach(c=>{
+    const li = document.createElement('li');
+    li.className = 'configs-item' + ((active && active===c.name) ? ' active' : '');
+    li.style.borderBottom = '1px solid var(--border)';
+    const name = document.createElement('div');
+    name.innerHTML = `<strong style="font-weight:700">${c.name}</strong> <span style="color:var(--muted);margin-left:6px">${c.provider} / ${c.model||''}</span>`;
+    name.style.fontSize = '.95rem';
+    const actions = document.createElement('div');
+    actions.style.marginTop = '8px';
+    actions.style.display = 'flex';
+    actions.style.gap = '8px';
+    const actBtn = document.createElement('button');
+    actBtn.className = 'btn btn-secondary';
+    actBtn.textContent = 'Activate';
+    actBtn.onclick = ()=> activateConfig(c.name);
+    const delBtn = document.createElement('button');
+    delBtn.className = 'btn btn-clear';
+    delBtn.textContent = 'Delete';
+    delBtn.onclick = ()=> deleteConfig(c.name);
+    actions.appendChild(actBtn);
+    actions.appendChild(delBtn);
+    li.appendChild(name);
+    li.appendChild(actions);
+    ul.appendChild(li);
+  });
+}
+
+async function activateConfig(name){
+  try{
+    const r = await fetch('/api/config/activate', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name})});
+    const d = await r.json();
+    if(d.ok){ showToast('Activated '+name,'ok'); loadConfigs(); }
+    else showToast('Activate failed: '+(d.error||''),'error');
+  }catch(e){ showToast('Network error','error'); }
+}
+
+async function deleteConfig(name){
+  if(!confirm('Delete config '+name+' ?')) return;
+  try{
+    const r = await fetch('/api/config/'+encodeURIComponent(name), {method:'DELETE'});
+    const d = await r.json();
+    if(d.ok){ showToast('Deleted '+name,'ok'); loadConfigs(); }
+    else showToast('Delete failed: '+(d.error||''),'error');
+  }catch(e){ showToast('Network error','error'); }
+}
+
+async function showList(){
+  // Load configs then render the list into the top panel (centered)
+    const top = document.getElementById('top-panel');
+    top.innerHTML = '';
+    try{
+      await loadConfigs();
+      const listContainer = document.getElementById('llm-list');
+      if(!listContainer){
+        console.error('llm-list not found');
+        return;
+      }
+      // Make sure the container is visible and move it (preserves event handlers)
+      listContainer.style.display = '';
+      listContainer.style.maxWidth = '720px';
+      listContainer.style.background = 'transparent';
+      top.appendChild(listContainer);
+      window.scrollTo({top:0,behavior:'smooth'});
+    }catch(e){
+      console.error('showList loadConfigs failed', e);
+  }
+}
+
+function showAdd(){
+  // Move the existing add form into the top panel and make it visible
+  const top = document.getElementById('top-panel');
+  const form = document.getElementById('add-form');
+  if(!form) return;
+  top.innerHTML = '';
+  // Ensure the form is visible (it may have inline display:none)
+  form.style.display = '';
+  // Move the form node into the top panel (preserves event handlers and IDs)
+  top.appendChild(form);
+  // Re-run provider init against the moved form
+  setTimeout(()=>{
+    onProviderChange();
+    const p = document.getElementById('provider');
+    if(p) p.dispatchEvent(new Event('change'));
+  },50);
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+
+// Do not auto-load configs on page load; list appears only when clicking "LLM List"
 </script>
 {% endblock %}

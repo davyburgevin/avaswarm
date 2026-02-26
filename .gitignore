@@ -13,3 +13,7 @@ venv/
 .ruff_cache/
 .mypy_cache/
 .pytest_cache/
+auth_profiles.json
+.temp_save_identity.py
+logs/
+.scripts/

@@ -96,6 +96,25 @@ def _persist_env(data: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Multiple named LLM configs persistence
+# ---------------------------------------------------------------------------
+_CONFIGS_FILE = Path(__file__).resolve().parent.parent.parent / "llm_configs.json"
+
+def _load_configs() -> dict:
+    if not _CONFIGS_FILE.exists():
+        return {"configs": [], "active": None}
+    try:
+        import json
+        return json.loads(_CONFIGS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {"configs": [], "active": None}
+
+def _save_configs(data: dict) -> None:
+    import json
+    _CONFIGS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
 # Helper — build a live provider instance from a ConfigPayload
 # ---------------------------------------------------------------------------
 def _provider_from_payload(payload: "ConfigPayload"):
@@ -146,6 +165,7 @@ _runtime_config: dict = {
 class ConfigPayload(BaseModel):
     provider: str
     model: str
+    name: str = ""
     openai_api_key: str = ""
     openai_base_url: str = ""
     anthropic_api_key: str = ""
@@ -191,7 +211,17 @@ class WebGateway(BaseGateway):
 
         @app.get("/", response_class=HTMLResponse)
         async def page_home(request: Request):
-            return templates.TemplateResponse("index.html", {"request": request})
+            # Try to extract first name from long-term memory (saved as 'UserFirstName: NAME')
+            first_name = None
+            try:
+                lt = agent.memory.get_long_term_sync() or ""
+                for line in lt.splitlines():
+                    if line.startswith("UserFirstName:"):
+                        first_name = line.split(":", 1)[1].strip()
+                        break
+            except Exception:
+                first_name = None
+            return templates.TemplateResponse("index.html", {"request": request, "first_name": first_name})
 
         @app.get("/chat", response_class=HTMLResponse)
         async def page_chat(request: Request):
@@ -202,9 +232,12 @@ class WebGateway(BaseGateway):
 
         @app.get("/config", response_class=HTMLResponse)
         async def page_config(request: Request):
+            cfgs = _load_configs()
             return templates.TemplateResponse("config.html", {
                 "request": request,
                 "current": _runtime_config,
+                "configs": cfgs.get("configs", []),
+                "active": cfgs.get("active"),
             })
 
         @app.get("/memory", response_class=HTMLResponse)
@@ -233,8 +266,12 @@ class WebGateway(BaseGateway):
 
         @app.get("/api/config")
         async def api_get_config():
-            return {k: ("***" if ("key" in k or "token" in k) and v else v)
-                    for k, v in _runtime_config.items()}
+            cfgs = _load_configs()
+            base = {k: ("***" if ("key" in k or "token" in k) and v else v)
+                for k, v in _runtime_config.items()}
+            base["configs"] = cfgs.get("configs", [])
+            base["active"] = cfgs.get("active")
+            return base
 
         @app.post("/api/config")
         async def api_save_config(payload: ConfigPayload):
@@ -253,22 +290,105 @@ class WebGateway(BaseGateway):
                 logger.error("api_save_config error: %s", exc)
                 return {"ok": False, "error": str(exc)}
 
-        @app.post("/api/config/test")
-        async def api_test_config(payload: ConfigPayload):
-            import traceback
-            import time
-            logs: list[str] = []
-            t0 = time.monotonic()
-
-            def log(msg: str):
-                elapsed = f"{(time.monotonic()-t0)*1000:.0f}ms"
-                entry = f"[{elapsed}] {msg}"
-                logs.append(entry)
-                logger.info("[config/test] %s", msg)
-
+        @app.post("/api/config")
+        async def api_save_config(payload: ConfigPayload):
+            data = payload.model_dump()
+            # upsert named config
             try:
-                from swarm.providers.registry import registry
-                from swarm.providers.base import CompletionRequest, Message
+                cfg_blob = _load_configs()
+                configs = cfg_blob.get("configs", [])
+                name = payload.name or payload.model or f"cfg-{len(configs)+1}"
+                # create config dict
+                cfg = {
+                    "name": name,
+                    "provider": payload.provider,
+                    "model": payload.model,
+                    "openai_api_key": payload.openai_api_key,
+                    "openai_base_url": payload.openai_base_url,
+                    "anthropic_api_key": payload.anthropic_api_key,
+                    "openrouter_api_key": payload.openrouter_api_key,
+                    "openrouter_base_url": payload.openrouter_base_url,
+                    "github_copilot_token": payload.github_copilot_token,
+                    "vllm_base_url": payload.vllm_base_url,
+                    "context_window": payload.context_window,
+                }
+                # replace or append
+                found = False
+                for i, c in enumerate(configs):
+                    if c.get("name") == name:
+                        configs[i] = cfg
+                        found = True
+                        break
+                if not found:
+                    configs.append(cfg)
+                cfg_blob["configs"] = configs
+                # optionally set active if payload.name equals active or if no active exists
+                if cfg_blob.get("active") is None:
+                    cfg_blob["active"] = name
+                _save_configs(cfg_blob)
+
+                # If the saved config is the active one, apply immediately
+                if cfg_blob.get("active") == name:
+                    agent.provider = _provider_from_payload(payload)
+                    agent.model = payload.model or agent.model
+                    agent.context_window = payload.context_window
+                    _runtime_config.update({k: v for k, v in data.items() if v})
+                    _persist_env(data)
+                return {"ok": True, "name": name}
+            except Exception as exc:
+                logger.error("api_save_config error: %s", exc)
+                return {"ok": False, "error": str(exc)}
+
+        @app.post("/api/config/activate")
+        async def api_activate_config(body: dict):
+            name = body.get("name")
+            if not name:
+                return {"ok": False, "error": "name required"}
+            cfg_blob = _load_configs()
+            configs = cfg_blob.get("configs", [])
+            selected = next((c for c in configs if c.get("name") == name), None)
+            if not selected:
+                return {"ok": False, "error": "config not found"}
+            # apply
+            try:
+                from pydantic import BaseModel
+                # use ConfigPayload to build provider
+                cp = ConfigPayload(**{
+                    "provider": selected.get("provider"),
+                    "model": selected.get("model"),
+                    "openai_api_key": selected.get("openai_api_key", ""),
+                    "openai_base_url": selected.get("openai_base_url", ""),
+                    "anthropic_api_key": selected.get("anthropic_api_key", ""),
+                    "openrouter_api_key": selected.get("openrouter_api_key", ""),
+                    "openrouter_base_url": selected.get("openrouter_base_url", ""),
+                    "github_copilot_token": selected.get("github_copilot_token", ""),
+                    "vllm_base_url": selected.get("vllm_base_url", ""),
+                    "context_window": selected.get("context_window", settings.context_window),
+                })
+                agent.provider = _provider_from_payload(cp)
+                agent.model = cp.model or agent.model
+                agent.context_window = cp.context_window
+                _runtime_config.update({"provider": cp.provider, "model": cp.model, "context_window": cp.context_window})
+                cfg_blob["active"] = name
+                _save_configs(cfg_blob)
+                _persist_env({"model": cp.model, "openai_api_key": cp.openai_api_key})
+                return {"ok": True}
+            except Exception as exc:
+                logger.error("activate error: %s", exc)
+                return {"ok": False, "error": str(exc)}
+
+        @app.delete("/api/config/{name}")
+        async def api_delete_config(name: str):
+            try:
+                blob = _load_configs()
+                configs = [c for c in blob.get("configs", []) if c.get("name") != name]
+                blob["configs"] = configs
+                if blob.get("active") == name:
+                    blob["active"] = configs[0].get("name") if configs else None
+                _save_configs(blob)
+                return {"ok": True}
+            except Exception as exc:
+                return {"ok": False, "error": str(exc)}
 
                 log(f"Provider: {payload.provider} | Model: {payload.model}")
 
