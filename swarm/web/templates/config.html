@@ -39,26 +39,6 @@
         </select>
       </div>
 
-      <!-- Model -->
-      <div class="section-title">Model</div>
-      <div class="row-2">
-        <div class="field">
-          <label for="model">Model name</label>
-          <input id="model" type="text" placeholder="e.g. gpt-4o" value="{{ current.model }}"/>
-        </div>
-        <div class="field">
-          <label for="context_window">Context window</label>
-          <select id="context_window">
-            <option value="4096"   {% if current.context_window|int == 4096   %}selected{% endif %}>4k  — très petits modèles</option>
-            <option value="8192"   {% if current.context_window|int == 8192   %}selected{% endif %}>8k  — modèles 8B standard</option>
-            <option value="16000"  {% if current.context_window|int == 16000 or not current.context_window %}selected{% endif %}>16k — recommandé (défaut)</option>
-            <option value="32768"  {% if current.context_window|int == 32768  %}selected{% endif %}>32k — grands modèles</option>
-            <option value="65536"  {% if current.context_window|int == 65536  %}selected{% endif %}>64k — very large context</option>
-            <option value="131072" {% if current.context_window|int == 131072 %}selected{% endif %}>128k — max (GPT-4o, Claude…)</option>
-          </select>
-        </div>
-      </div>
-
       <!-- Credentials — shown/hidden per provider -->
       <div class="section-title">Credentials</div>
 
@@ -92,9 +72,54 @@
       </div>
 
       <div id="cred-github_copilot" style="display:none">
-        <div class="field">
-          <label>GitHub OAuth Token</label>
-          <input id="github_copilot_token" type="password" placeholder="ghu_..." value="{{ current.github_copilot_token }}"/>
+        <div style="font-size:.95rem;margin-bottom:8px">Procédure recommandée — GitHub Copilot SDK</div>
+        <div style="font-size:.86rem;color:var(--muted);margin-bottom:12px">
+          Ce projet supporte l'intégration via le <strong>GitHub Copilot SDK</strong> (Technical Preview). Suivez l'une des deux options ci‑dessous :
+        </div>
+
+        <div style="margin-bottom:10px">
+          <strong>Option A — Device login (recommandé)</strong>
+          <ol style="margin:6px 0 6px 18px">
+            <li>Cliquez sur <em>Sign in with GitHub (device login)</em>. Un code et une URL vous seront fournis.</li>
+            <li>Ouvrez la page indiquée (ou <a href="https://github.com/login/device" target="_blank">https://github.com/login/device</a>) et entrez le code fourni.</li>
+            <li>Revenez ici — la page vérifiera automatiquement l'autorisation et enregistrera le token Copilot si l'autorisation est accordée.</li>
+          </ol>
+          <div style="margin-top:8px">
+            <button class="btn btn-primary" onclick="startCopilotDevice()">Sign in with GitHub (device login)</button>
+            <button class="btn btn-secondary" style="margin-left:8px" onclick="startCopilotDevice('Iv1.b507a08c87ecfe98')" title="Utilise le client ID officiel VS Code — donne accès aux 32 modèles Copilot Enterprise">Sign in via VS Code app (32 modèles)</button>
+            <div id="device-instructions" style="margin-top:8px;display:none;padding:10px;border:1px dashed var(--border);border-radius:6px">
+              <div id="device-user-code" style="font-weight:700;font-size:1.1rem"></div>
+              <div style="font-size:.9rem;color:var(--muted)">Visit <a href="https://github.com/login/device" target="_blank">https://github.com/login/device</a> and enter the code above.</div>
+              <div style="margin-top:8px"><button class="btn btn-secondary" onclick="pollDevice()">Check authorization</button> <span id="device-status" style="margin-left:8px;color:var(--muted)"></span></div>
+            </div>
+          </div>
+        </div>
+
+          <!-- OAuth Client ID + saved token -->
+          <div style="margin-bottom:10px">
+            <div class="field">
+              <label>OAuth Client ID</label>
+              <input id="github_oauth_client_id" type="text" placeholder="ex: Ov23liC0w4ClLGC4cJHU" value="{{ current.github_oauth_client_id }}"/>
+              <div style="font-size:.78rem;color:var(--muted);margin-top:3px">
+                Client ID de votre GitHub OAuth App (Settings → Developer settings → OAuth Apps).
+              </div>
+            </div>
+            </div>
+            <div class="field">
+              <label>GitHub OAuth Token <span style="color:var(--muted);font-size:.8em">(rempli automatiquement par le device login)</span></label>
+              <input id="github_copilot_token" type="password" placeholder="ghu_..." value="{{ current.github_copilot_token }}"/>
+            </div>
+          </div>
+
+        <div style="font-size:.82rem;color:var(--muted);margin-top:8px">Docs Copilot SDK: <a href="https://github.com/github/copilot-sdk" target="_blank">https://github.com/github/copilot-sdk</a></div>
+        <div style="font-size:.82rem;color:var(--muted);margin-top:6px">
+          <strong>Modèles disponibles :</strong>
+          <code>gpt-4o</code> (recommandé) &nbsp;·&nbsp;
+          <code>gpt-4o-mini</code> &nbsp;·&nbsp;
+          <code>gpt-4o-2024-11-20</code> &nbsp;·&nbsp;
+          <code>gpt-4o-2024-08-06</code> &nbsp;·&nbsp;
+          <code>gpt-4o-mini-2024-07-18</code> &nbsp;·&nbsp;
+          <code>gpt-3.5-turbo</code>
         </div>
       </div>
 
@@ -102,6 +127,41 @@
         <div class="field">
           <label>vLLM Base URL</label>
           <input id="vllm_base_url" type="text" placeholder="http://localhost:8000/v1" value="{{ current.vllm_base_url }}"/>
+        </div>
+      </div>
+
+      <!-- Model -->
+      <div class="section-title">Model</div>
+      <div class="row-2">
+        <div class="field">
+          <label for="model">Model name</label>
+          <!-- Text input: shown for non-Copilot providers -->
+          <div id="model-input-text">
+            <input id="model" type="text" placeholder="e.g. gpt-4o" value="{{ current.model }}"/>
+          </div>
+          <!-- Select: shown only for GitHub Copilot -->
+          <div id="model-input-copilot" style="display:none">
+            <div style="display:flex;gap:6px;align-items:center">
+              <select id="model-copilot" onchange="onCopilotModelChange()" style="flex:1"></select>
+              <button class="btn btn-secondary" style="padding:4px 10px;font-size:.8rem" onclick="refreshCopilotModels()" title="Recharger la liste des modèles">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+              </button>
+            </div>
+            <div id="copilot-model-hint" style="font-size:.78rem;color:var(--muted);margin-top:4px"></div>
+          </div>
+        </div>
+        <div class="field">
+          <label for="context_window">Context window</label>
+          <select id="context_window">
+            <option value="4096"   {% if current.context_window|int == 4096   %}selected{% endif %}>4k  — très petits modèles</option>
+            <option value="8192"   {% if current.context_window|int == 8192   %}selected{% endif %}>8k  — modèles 8B standard</option>
+            <option value="16000"  {% if current.context_window|int == 16000 or not current.context_window %}selected{% endif %}>16k — recommandé (défaut)</option>
+            <option value="32768"  {% if current.context_window|int == 32768  %}selected{% endif %}>32k — grands modèles</option>
+            <option value="65536"  {% if current.context_window|int == 65536  %}selected{% endif %}>64k — very large context</option>
+            <option value="131072" {% if current.context_window|int == 131072 %}selected{% endif %}>128k — max (GPT-4o, Claude…)</option>
+            <option value="200000" {% if current.context_window|int == 200000 %}selected{% endif %}>200k — Claude 3.5 / o3</option>
+            <option value="1000000" {% if current.context_window|int == 1000000 %}selected{% endif %}>1M — Gemini 1.5/2.0</option>
+          </select>
         </div>
       </div>
 
@@ -140,6 +200,117 @@
 <script>
 const PROVIDERS = ['openai','anthropic','openrouter','github_copilot','vllm'];
 
+// context window in tokens → closest select option value
+function ctxToOption(tokens) {
+  const opts = [4096, 8192, 16000, 32768, 65536, 131072, 200000];
+  return opts.reduce((prev, cur) => Math.abs(cur - tokens) < Math.abs(prev - tokens) ? cur : prev);
+}
+
+let _copilotModelsCache = null;
+
+function refreshCopilotModels() {
+  _copilotModelsCache = null;
+  const sel = document.getElementById('model-copilot');
+  if (sel) sel.innerHTML = '<option value="">Loading…</option>';
+  const hint = document.getElementById('copilot-model-hint');
+  if (hint) hint.textContent = '';
+  loadCopilotModels(document.getElementById('model').value);
+}
+
+async function loadCopilotModels(currentModel) {
+  const sel = document.getElementById('model-copilot');
+  const hint = document.getElementById('copilot-model-hint');
+  if (_copilotModelsCache) {
+    populateCopilotSelect(sel, hint, _copilotModelsCache, currentModel);
+    return;
+  }
+  sel.innerHTML = '<option value="">Loading…</option>';
+  try {
+    const r = await fetch('/api/copilot/models');
+    const d = await r.json();
+    if (d.ok && d.models.length) {
+      _copilotModelsCache = d.models;
+      populateCopilotSelect(sel, hint, d.models, currentModel);
+    } else {
+      // fallback: known models
+      _copilotModelsCache = [
+        {id:'gpt-4o',            name:'GPT-4o',                vendor:'Azure OpenAI', context:128000, picker:true},
+        {id:'gpt-4o-mini',       name:'GPT-4o mini',           vendor:'Azure OpenAI', context:128000, picker:false},
+        {id:'gpt-4o-2024-11-20', name:'GPT-4o (2024-11-20)',   vendor:'Azure OpenAI', context:128000, picker:false},
+        {id:'gpt-4o-2024-08-06', name:'GPT-4o (2024-08-06)',   vendor:'Azure OpenAI', context:128000, picker:false},
+        {id:'gpt-4o-mini-2024-07-18', name:'GPT-4o mini (2024-07-18)', vendor:'Azure OpenAI', context:128000, picker:false},
+        {id:'gpt-3.5-turbo',     name:'GPT-3.5 Turbo',         vendor:'Azure OpenAI', context:16384,  picker:false},
+        {id:'claude-3.5-sonnet', name:'Claude 3.5 Sonnet',     vendor:'Anthropic',    context:200000, picker:true},
+        {id:'claude-3.5-haiku',  name:'Claude 3.5 Haiku',      vendor:'Anthropic',    context:200000, picker:true},
+        {id:'o1',                name:'o1',                    vendor:'Azure OpenAI', context:128000, picker:true},
+        {id:'o1-mini',           name:'o1-mini',               vendor:'Azure OpenAI', context:128000, picker:false},
+        {id:'o3-mini',           name:'o3-mini',               vendor:'Azure OpenAI', context:200000, picker:true},
+        {id:'gemini-2.0-flash',  name:'Gemini 2.0 Flash',      vendor:'Google',       context:1000000, picker:true},
+        {id:'gemini-1.5-pro',    name:'Gemini 1.5 Pro',        vendor:'Google',       context:1000000, picker:false},
+      ];
+      populateCopilotSelect(sel, hint, _copilotModelsCache, currentModel);
+      if (d.error) hint.textContent = '⚠ ' + d.error + ' — showing known models';
+    }
+  } catch(e) {
+    sel.innerHTML = '<option value="gpt-4o">gpt-4o (fallback)</option>';
+    hint.textContent = 'Could not load models: ' + e.message;
+  }
+}
+
+function populateCopilotSelect(sel, hint, models, currentModel) {
+  sel.innerHTML = '';
+  // Normalize missing vendor to 'Other'
+  const normalized = models.map(m => ({...m, vendor: m.vendor || 'Other'}));
+  // Group by vendor
+  const vendors = [...new Set(normalized.map(m => m.vendor))];
+  if (vendors.length > 1) {
+    vendors.forEach(vendor => {
+      const group = document.createElement('optgroup');
+      group.label = vendor;
+      normalized.filter(m => m.vendor === vendor).forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m.id;
+        opt.textContent = m.name + (m.picker ? '' : '');
+        opt.dataset.context = m.context;
+        if (m.id === currentModel || (!currentModel && m.id === 'gpt-4o')) opt.selected = true;
+        group.appendChild(opt);
+      });
+      sel.appendChild(group);
+    });
+  } else {
+    normalized.forEach(m => {
+      const opt = document.createElement('option');
+      opt.value = m.id;
+      opt.textContent = m.name;
+      opt.dataset.context = m.context;
+      if (m.id === currentModel || (!currentModel && m.id === 'gpt-4o')) opt.selected = true;
+      sel.appendChild(opt);
+    });
+  }
+  onCopilotModelChange();
+}
+
+function onCopilotModelChange() {
+  const sel = document.getElementById('model-copilot');
+  const opt = sel.options[sel.selectedIndex];
+  if (!opt || !opt.dataset.context) return;
+  const ctxTokens = parseInt(opt.dataset.context);
+  const ctxSel = document.getElementById('context_window');
+  const best = ctxToOption(ctxTokens);
+  // Ensure the option exists (e.g. 200000)
+  let found = false;
+  for (let o of ctxSel.options) { if (parseInt(o.value) === best) { o.selected = true; found = true; break; } }
+  if (!found) {
+    const newOpt = document.createElement('option');
+    newOpt.value = best;
+    newOpt.textContent = (best >= 1000000 ? Math.round(best/1000)+'k' : Math.round(best/1000)+'k') + ' — ' + opt.textContent;
+    ctxSel.appendChild(newOpt);
+    newOpt.selected = true;
+  }
+  const hint = document.getElementById('copilot-model-hint');
+  hint.textContent = opt.dataset.context ? `Context: ${parseInt(opt.dataset.context).toLocaleString()} tokens` : '';
+}
+
 function onProviderChange(){
   const v = document.getElementById('provider').value;
   const models = {
@@ -154,10 +325,21 @@ function onProviderChange(){
     const el = document.getElementById('cred-'+p);
     if(el) el.style.display = (p===v) ? 'block' : 'none';
   });
-  // Suggest model
-  const m = document.getElementById('model');
-  if(!m.value || Object.values(models).includes(m.value)){
-    m.value = models[v] || '';
+  // Toggle model input vs copilot dropdown
+  const textWrap   = document.getElementById('model-input-text');
+  const copilotWrap = document.getElementById('model-input-copilot');
+  if (v === 'github_copilot') {
+    textWrap.style.display   = 'none';
+    copilotWrap.style.display = 'block';
+    loadCopilotModels(document.getElementById('model').value || models.github_copilot);
+  } else {
+    textWrap.style.display   = 'block';
+    copilotWrap.style.display = 'none';
+    // Suggest model for non-copilot providers
+    const m = document.getElementById('model');
+    if(!m.value || Object.values(models).includes(m.value)){
+      m.value = models[v] || '';
+    }
   }
   clearStatus();
 }
@@ -174,9 +356,19 @@ function buildPayload(){
   document.querySelectorAll('#cred-'+p+' input').forEach(inp => {
     fields[inp.id] = inp.value;
   });
+  // For Copilot, read model from the dropdown; otherwise from the text input
+  let model;
+  if (p === 'github_copilot') {
+    const sel = document.getElementById('model-copilot');
+    model = sel ? sel.value : '';
+    // keep hidden text input in sync so saved configs restore correctly
+    if (model) document.getElementById('model').value = model;
+  } else {
+    model = document.getElementById('model').value;
+  }
   return {
     provider: p,
-    model: document.getElementById('model').value,
+    model,
     context_window: parseInt(document.getElementById('context_window').value),
     ...fields,
   };
@@ -241,6 +433,81 @@ async function testConnection(){
     logEl.textContent += '\nNetwork error: '+e.message;
     showToast('Network error: '+e.message, 'error');
   }
+}
+
+let _device_blob = null;
+let _device_poll_id = null;
+let _device_poll_interval_ms = 5000;
+async function startCopilotDevice(overrideClientId){
+  const instr = document.getElementById('device-instructions');
+  const userCodeEl = document.getElementById('device-user-code');
+  const statusEl = document.getElementById('device-status');
+  instr.style.display = 'block';
+  statusEl.textContent = 'Starting…';
+  try{
+    const clientId = overrideClientId || document.getElementById('github_oauth_client_id')?.value || '';
+    const r = await fetch('/api/copilot/device/start', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({client_id: clientId})});
+    const d = await r.json();
+    if(d.ok){
+      _device_blob = {...d, _used_client_id: clientId};
+      userCodeEl.textContent = d.user_code + '  —  ' + d.verification_uri;
+      statusEl.textContent = 'Waiting for you to authorise';
+      showToast('Enter the code at github.com/login/device', 'ok');
+      // start polling automatically using interval from response (if provided)
+      try{
+        const interval = parseInt(d.interval) || 5;
+        _device_poll_interval_ms = interval * 1000;
+      }catch(e){ _device_poll_interval_ms = 5000; }
+      // clear previous poll if any
+      if(_device_poll_id) clearInterval(_device_poll_id);
+      _device_poll_id = setInterval(()=>{ pollDevice(); }, _device_poll_interval_ms);
+    } else {
+      statusEl.textContent = 'Error: '+(d.error||'');
+    }
+  }catch(e){
+    statusEl.textContent = 'Network error';
+  }
+}
+
+async function pollDevice(){
+  const statusEl = document.getElementById('device-status');
+  if(!_device_blob || !_device_blob.device_code){ statusEl.textContent = 'No device flow started'; return; }
+  statusEl.textContent = 'Checking…';
+  try{
+    const r = await fetch('/api/copilot/device/exchange', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({device_code: _device_blob.device_code, client_id: _device_blob._used_client_id || document.getElementById('github_oauth_client_id')?.value || ''})
+    });
+    const d = await r.json();
+    if(d.ok){
+      statusEl.textContent = 'Authorised — token saved';
+      showToast('GitHub token saved', 'ok');
+      // update form field
+      const t = document.getElementById('github_copilot_token');
+      if(t) t.value = d.access_token;
+      // stop polling
+      if(_device_poll_id){ clearInterval(_device_poll_id); _device_poll_id = null; }
+      // Force refresh of model list with new token
+      refreshCopilotModels();
+      return;
+    } else if(d.status){
+      statusEl.textContent = d.status;
+      // handle slow_down: GitHub spec says add 5s to interval
+      if(d.status === 'slow_down'){
+        if(_device_poll_id){ clearInterval(_device_poll_id); }
+        _device_poll_interval_ms = Math.min(60000, _device_poll_interval_ms + 5000);
+        statusEl.textContent = 'Polling trop rapide — attente ' + (_device_poll_interval_ms/1000) + 's…';
+        _device_poll_id = setInterval(()=>{ pollDevice(); }, _device_poll_interval_ms);
+      } else if(d.status === 'authorization_pending'){
+        statusEl.textContent = 'En attente d\'autorisation GitHub…';
+      } else if(d.status === 'expired_token'){
+        if(_device_poll_id){ clearInterval(_device_poll_id); _device_poll_id = null; }
+        statusEl.textContent = 'Code expiré — relancez le device login';
+      }
+    } else {
+      statusEl.textContent = 'Pending';
+    }
+  }catch(e){ statusEl.textContent = 'Network error'; }
 }
 
 async function saveConfig(){

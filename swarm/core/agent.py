@@ -241,18 +241,25 @@ class Agent:
         return await self.tools.call(fn_name, **args)
 
     async def _save_user_identity(self) -> None:
-        """Detect Windows user display name and persist concise facts to long-term memory."""
+        """Detect Windows user display name and persist concise facts to long-term memory.
+
+        Uses upsert_profile_entry so that existing correct values are never
+        re-written, avoiding the file growing with duplicate entries on every
+        agent startup.
+        """
         try:
             display = get_windows_display_name()
             if not display:
                 return
             first, last = split_name(display)
-            # Store structured facts for later lookup
-            await self.memory.append_long_term(f"UserDisplayName: {display}")
+            changed = await self.memory.upsert_profile_entry("UserDisplayName", display)
             if first:
-                await self.memory.append_long_term(f"UserFirstName: {first}")
+                changed |= await self.memory.upsert_profile_entry("UserFirstName", first)
             if last:
-                await self.memory.append_long_term(f"UserLastName: {last}")
-            logger.info("Saved user identity to long-term memory: %s", display)
+                changed |= await self.memory.upsert_profile_entry("UserLastName", last)
+            if changed:
+                logger.info("User identity updated in long-term memory: %s", display)
+            else:
+                logger.debug("User identity already up-to-date in long-term memory: %s", display)
         except Exception as exc:
             logger.warning("_save_user_identity failed: %s", exc)

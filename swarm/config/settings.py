@@ -38,6 +38,8 @@ class Settings(BaseSettings):
 
     # --- GitHub Copilot ---
     github_copilot_token: str = ""
+    # --- GitHub OAuth (for device login flow) ---
+    github_oauth_client_id: str = ""
 
     # --- vLLM ---
     vllm_base_url: str = "http://localhost:8000/v1"

@@ -25,6 +25,7 @@ from pydantic import BaseModel
 
 from swarm.config import settings
 from swarm.gateways.base import BaseGateway
+import httpx
 
 if TYPE_CHECKING:
     from swarm.core.agent import Agent
@@ -50,6 +51,7 @@ _ENV_KEYS = {
     "openrouter_api_key":   "OPENROUTER_API_KEY",
     "openrouter_base_url":  "OPENROUTER_BASE_URL",
     "github_copilot_token": "GITHUB_COPILOT_TOKEN",
+    "github_oauth_client_id": "GITHUB_OAUTH_CLIENT_ID",
     "vllm_base_url":        "VLLM_BASE_URL",
     "context_window":       "CONTEXT_WINDOW",
 }
@@ -155,6 +157,7 @@ _runtime_config: dict = {
     "openrouter_api_key":   settings.openrouter_api_key,
     "openrouter_base_url":  settings.openrouter_base_url,
     "github_copilot_token": settings.github_copilot_token,
+    "github_oauth_client_id": settings.github_oauth_client_id,
     "vllm_base_url":        settings.vllm_base_url,
     "context_window":       settings.context_window,
 }
@@ -172,6 +175,7 @@ class ConfigPayload(BaseModel):
     openrouter_api_key: str = ""
     openrouter_base_url: str = ""
     github_copilot_token: str = ""
+    github_oauth_client_id: str = ""
     vllm_base_url: str = ""
     context_window: int = 16000
 
@@ -273,22 +277,242 @@ class WebGateway(BaseGateway):
             base["active"] = cfgs.get("active")
             return base
 
-        @app.post("/api/config")
-        async def api_save_config(payload: ConfigPayload):
-            data = payload.model_dump()
-            _runtime_config.update({k: v for k, v in data.items() if v})
+        @app.post("/api/config/test")
+        async def api_test_config(payload: ConfigPayload):
+            """Test a provider configuration by instantiating the provider and
+            sending a tiny completion request. Returns logs and any error.
+            """
+            logs: list[str] = []
+            def log(msg: str) -> None:
+                logs.append(str(msg))
+
             try:
-                agent.provider        = _provider_from_payload(payload)
-                agent.model           = payload.model or agent.model
-                agent.context_window  = payload.context_window
-                _runtime_config["context_window"] = payload.context_window
-                _persist_env(data)   # write to .env so config survives restart
-                logger.info("Provider switched to %s / %s, context_window=%s",
-                            payload.provider, agent.model, payload.context_window)
-                return {"ok": True}
+                log(f"Provider: {payload.provider} | Model: {payload.model}")
+
+                # For Copilot, pre-check that the model exists
+                if payload.provider == "github_copilot":
+                    try:
+                        # Use token from runtime config (updated by device login) or settings
+                        _tok = (
+                            payload.github_copilot_token
+                            or _runtime_config.get("github_copilot_token")
+                            or settings.github_copilot_token
+                        )
+                        if not _tok:
+                            raise RuntimeError("No token")
+                        # Try internal exchange; fall back to direct bearer
+                        _bearer = _tok
+                        try:
+                            async with httpx.AsyncClient() as _c:
+                                _ex = await _c.get(
+                                    "https://api.github.com/copilot_internal/v2/token",
+                                    headers={
+                                        "Authorization": f"token {_tok}",
+                                        "Accept": "application/json",
+                                        "User-Agent": "GithubCopilot/1.246.0",
+                                        "Editor-Version": "vscode/1.96.0",
+                                        "Editor-Plugin-Version": "copilot/1.246.0",
+                                    },
+                                    timeout=10,
+                                )
+                                if _ex.is_success:
+                                    _bearer = _ex.json().get("token", _tok)
+                        except Exception:
+                            pass
+                        async with httpx.AsyncClient() as _c:
+                            _mr = await _c.get(
+                                "https://api.githubcopilot.com/models",
+                                headers={
+                                    "Authorization": f"Bearer {_bearer}",
+                                    "Editor-Version": "vscode/1.96.0",
+                                    "Copilot-Integration-Id": "vscode-chat",
+                                    "User-Agent": "GithubCopilot/1.246.0",
+                                },
+                                timeout=10,
+                            )
+                        if _mr.is_success:
+                            _available = [m["id"] for m in _mr.json().get("data", [])]
+                            log(f"Available models ({len(_available)}): {', '.join(_available)}")
+                            if payload.model and payload.model not in _available:
+                                log(f"⚠ Model '{payload.model}' is NOT in the available list!")
+                                return {
+                                    "ok": False,
+                                    "error": f"Model '{payload.model}' is not available on your Copilot plan.",
+                                    "detail": f"Available models: {', '.join(_available)}",
+                                    "logs": logs,
+                                }
+                    except Exception as _me:
+                        log(f"Model pre-check skipped: {_me}")
+
+                # vLLM may require a lightweight HTTP probe before the full test
+                if payload.provider == "vllm":
+                    url = payload.vllm_base_url or settings.vllm_base_url
+                    try:
+                        base = url.rstrip('/')
+                        base_no_v1 = base.rsplit('/v1', 1)[0]
+                        async with httpx.AsyncClient() as c:
+                            ping = await c.get(base_no_v1 + '/api/tags', timeout=3)
+                        log(f"vLLM /api/tags HTTP {ping.status_code}")
+                    except Exception as ping_err:
+                        log(f"vLLM reachability probe failed: {ping_err}")
+
+                # Instantiate provider and send a tiny completion
+                prov = _provider_from_payload(payload)
+                log("Sending test completion request...")
+                from swarm.providers.base import CompletionRequest, Message
+                req = CompletionRequest(
+                    messages=[Message(role="user", content="Reply with only: OK")],
+                    model=payload.model,
+                    max_tokens=5,
+                )
+                resp = await prov.complete(req)
+                log(f"Success! model={resp.model} reply={resp.content[:40]!r}")
+                return {"ok": True, "model": resp.model, "reply": resp.content[:80], "logs": logs}
             except Exception as exc:
-                logger.error("api_save_config error: %s", exc)
+                import traceback
+                tb = traceback.format_exc()
+                log(f"ERROR: {exc}")
+                logger.error("[config/test] %s\n%s", exc, tb)
+                return {"ok": False, "error": str(exc), "detail": tb, "logs": logs}
+
+        # =============================================================
+        # Copilot device-login helpers
+        # =============================================================
+
+        @app.post('/api/copilot/device/start')
+        async def api_copilot_device_start(body: dict | None = None):
+            """Start GitHub OAuth device flow and return user_code + verification_uri.
+
+            The client_id may be provided in the POST body as {"client_id": "..."}.
+            If not provided we fall back to runtime config and then the .env settings.
+            """
+            client_id = None
+            if body and isinstance(body, dict):
+                client_id = body.get("client_id")
+            if not client_id:
+                client_id = _runtime_config.get("github_oauth_client_id") or settings.github_oauth_client_id
+            if not client_id:
+                return {"ok": False, "error": "GITHUB_OAUTH_CLIENT_ID not configured (provide it in the form or .env)"}
+            try:
+                async with httpx.AsyncClient() as c:
+                    r = await c.post(
+                        'https://github.com/login/device/code',
+                        data={"client_id": client_id, "scope": "read:user copilot"},
+                        headers={"Accept": "application/json"},
+                        timeout=10,
+                    )
+                r.raise_for_status()
+                return {"ok": True, **r.json()}
+            except Exception as exc:
+                logger.error("device/start error: %s", exc)
                 return {"ok": False, "error": str(exc)}
+
+        @app.post('/api/copilot/device/exchange')
+        async def api_copilot_device_exchange(body: dict):
+            """Attempt one exchange of device_code for an access token. Client should poll repeatedly.
+
+            Returns GitHub token on success. On pending/slow_down/authorization_pending, return that status.
+            """
+            device_code = body.get('device_code')
+            # allow client to pass client_id directly; otherwise use runtime config or settings
+            client_id = body.get('client_id') or _runtime_config.get('github_oauth_client_id') or settings.github_oauth_client_id
+            if not client_id or not device_code:
+                return {"ok": False, "error": "Missing client_id or device_code"}
+            try:
+                async with httpx.AsyncClient() as c:
+                    r = await c.post(
+                        'https://github.com/login/oauth/access_token',
+                        data={
+                            'client_id': client_id,
+                            'device_code': device_code,
+                            'grant_type': 'urn:ietf:params:oauth:grant-type:device_code',
+                        },
+                        headers={"Accept": "application/json"},
+                        timeout=10,
+                    )
+                r.raise_for_status()
+                data = r.json()
+                # Possible keys: access_token, error, error_description
+                if data.get('access_token'):
+                    token = data['access_token']
+                    # Persist token to .env using payload key so _persist_env maps it
+                    _persist_env({'github_copilot_token': token})
+                    # Also update runtime config so live agent uses it
+                    _runtime_config['github_copilot_token'] = token
+                    try:
+                        # If agent exists in closure, set provider token if active
+                        if agent and getattr(agent, 'provider', None) and getattr(agent.provider, 'name', '') == 'github_copilot':
+                            agent.provider._oauth_token = token  # type: ignore[attr-defined]
+                            agent.provider._session_token = None  # type: ignore[attr-defined]
+                        # Clear module-level session cache so next call re-runs exchange
+                        try:
+                            from swarm.providers.github_copilot_provider import _SESSION_CACHE
+                            _SESSION_CACHE.clear()
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+                    return {"ok": True, "access_token": token}
+                # Return error info (e.g., authorization_pending, slow_down)
+                return {"ok": False, "status": data.get('error'), "detail": data.get('error_description')}
+            except Exception as exc:
+                logger.error('device/exchange error: %s', exc)
+                return {"ok": False, "error": str(exc)}
+
+        @app.get('/api/copilot/models')
+        async def api_copilot_models():
+            """Fetch the live model list from api.githubcopilot.com using the stored token."""
+            token = _runtime_config.get('github_copilot_token') or settings.github_copilot_token
+            if not token:
+                return {"ok": False, "error": "No GitHub Copilot token configured", "models": []}
+            # Resolve bearer token (try internal exchange first, fall back to OAuth token directly)
+            bearer = token
+            try:
+                async with httpx.AsyncClient() as c:
+                    r = await c.get(
+                        'https://api.github.com/copilot_internal/v2/token',
+                        headers={
+                            "Authorization": f"token {token}",
+                            "Accept": "application/json",
+                            "User-Agent": "GithubCopilot/1.246.0",
+                            "Editor-Version": "vscode/1.96.0",
+                            "Editor-Plugin-Version": "copilot/1.246.0",
+                        },
+                        timeout=10,
+                    )
+                    if r.is_success:
+                        bearer = r.json().get('token', token)
+            except Exception:
+                pass
+            try:
+                async with httpx.AsyncClient() as c:
+                    r = await c.get(
+                        'https://api.githubcopilot.com/models',
+                        headers={
+                            "Authorization": f"Bearer {bearer}",
+                            "Content-Type": "application/json",
+                            "Editor-Version": "vscode/1.96.0",
+                            "Copilot-Integration-Id": "vscode-chat",
+                            "User-Agent": "GithubCopilot/1.246.0",
+                        },
+                        timeout=15,
+                    )
+                r.raise_for_status()
+                data = r.json()
+                models = [
+                    {
+                        "id": m["id"],
+                        "name": m.get("name") or m["id"],
+                        "vendor": m.get("vendor") or "",
+                        "context": m.get("capabilities", {}).get("limits", {}).get("max_context_window_tokens", 128000),
+                        "picker": m.get("model_picker_enabled", False),
+                    }
+                    for m in data.get("data", [])
+                ]
+                return {"ok": True, "models": models}
+            except Exception as exc:
+                logger.error("api_copilot_models error: %s", exc)
+                return {"ok": False, "error": str(exc), "models": []}
 
         @app.post("/api/config")
         async def api_save_config(payload: ConfigPayload):
@@ -309,6 +533,7 @@ class WebGateway(BaseGateway):
                     "openrouter_api_key": payload.openrouter_api_key,
                     "openrouter_base_url": payload.openrouter_base_url,
                     "github_copilot_token": payload.github_copilot_token,
+                    "github_oauth_client_id": payload.github_oauth_client_id,
                     "vllm_base_url": payload.vllm_base_url,
                     "context_window": payload.context_window,
                 }
@@ -362,6 +587,7 @@ class WebGateway(BaseGateway):
                     "openrouter_api_key": selected.get("openrouter_api_key", ""),
                     "openrouter_base_url": selected.get("openrouter_base_url", ""),
                     "github_copilot_token": selected.get("github_copilot_token", ""),
+                    "github_oauth_client_id": selected.get("github_oauth_client_id", ""),
                     "vllm_base_url": selected.get("vllm_base_url", ""),
                     "context_window": selected.get("context_window", settings.context_window),
                 })
@@ -371,7 +597,7 @@ class WebGateway(BaseGateway):
                 _runtime_config.update({"provider": cp.provider, "model": cp.model, "context_window": cp.context_window})
                 cfg_blob["active"] = name
                 _save_configs(cfg_blob)
-                _persist_env({"model": cp.model, "openai_api_key": cp.openai_api_key})
+                _persist_env(cp.model_dump())  # persist all fields, not just model+openai_api_key
                 return {"ok": True}
             except Exception as exc:
                 logger.error("activate error: %s", exc)
@@ -389,69 +615,6 @@ class WebGateway(BaseGateway):
                 return {"ok": True}
             except Exception as exc:
                 return {"ok": False, "error": str(exc)}
-
-                log(f"Provider: {payload.provider} | Model: {payload.model}")
-
-                if payload.provider == "vllm":
-                    url = payload.vllm_base_url or settings.vllm_base_url
-                    kwargs = {"base_url": url, "model": payload.model}
-                    log(f"vLLM base_url: {url}")
-                    log(f"vLLM model: {payload.model!r}")
-                    # Direct httpx probe — bypasses OpenAI SDK to isolate SDK vs server issues
-                    import httpx
-                    try:
-                        base = url.rstrip('/')
-                        base_no_v1 = base.rsplit('/v1', 1)[0]
-                        # Ollama tags endpoint = fast reachability check (no CPU needed)
-                        try:
-                            async with httpx.AsyncClient() as c:
-                                ping = await c.get(base_no_v1 + '/api/tags', timeout=3)
-                                log(f"Ollama /api/tags HTTP {ping.status_code}")
-                        except Exception as ping_err:
-                            log(f"Reachability probe failed: {ping_err}")
-                        # Raw chat/completions call — same payload the SDK would send
-                        raw_payload = {
-                            "model": payload.model,
-                            "messages": [{"role": "user", "content": "Reply with only: OK"}],
-                            "max_tokens": 5,
-                            "stream": False,
-                        }
-                        log(f"Direct POST {base}/chat/completions  model={payload.model!r}")
-                        async with httpx.AsyncClient() as c:
-                            r = await c.post(
-                                f"{base}/chat/completions",
-                                json=raw_payload,
-                                headers={"Content-Type": "application/json",
-                                         "Authorization": "Bearer EMPTY"},
-                                timeout=30,
-                            )
-                            log(f"Direct HTTP {r.status_code}: {r.text[:300]}")
-                            if r.is_success:
-                                log("Direct call OK — SDK path proceeding…")
-                            else:
-                                return {"ok": False,
-                                        "error": f"Ollama HTTP {r.status_code}",
-                                        "detail": r.text, "logs": logs}
-                    except Exception as probe_err:
-                        log(f"Direct probe error: {probe_err}")
-
-                log("Instantiating provider...")
-                prov = _provider_from_payload(payload)
-
-                log("Sending test completion request...")
-                req  = CompletionRequest(
-                    messages=[Message(role="user", content="Reply with only: OK")],
-                    model=payload.model,
-                    max_tokens=5,
-                )
-                resp = await prov.complete(req)
-                log(f"Success! model={resp.model} reply={resp.content[:40]!r}")
-                return {"ok": True, "model": resp.model, "reply": resp.content[:80], "logs": logs}
-            except Exception as exc:
-                tb = traceback.format_exc()
-                log(f"ERROR: {exc}")
-                logger.error("[config/test] %s\n%s", exc, tb)
-                return {"ok": False, "error": str(exc), "detail": tb, "logs": logs}
 
         # ==============================================================
         # API — CHAT (REST fallback)
