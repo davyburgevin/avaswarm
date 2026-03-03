@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>{% block title %}Swarm{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css?v=6"/>
+</head>
+<body>
+<div class="page">
+
+  <header class="topbar">
+    <div class="logo">
+      <!-- AvaSwarm knot mark -->
+      <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" width="28" height="28">
+        <path d="M20 4C11.2 4 4 11.2 4 20s7.2 16 16 16 16-7.2 16-16S28.8 4 20 4z" fill="#FF6200" opacity=".15"/>
+        <path d="M13 20c0-3.9 3.1-7 7-7 2.1 0 4 .9 5.3 2.4" stroke="#FF6200" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+        <path d="M27 20c0 3.9-3.1 7-7 7-2.1 0-4-.9-5.3-2.4" stroke="#CC0000" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+        <circle cx="20" cy="20" r="2.5" fill="#FF6200"/>
+      </svg>
+      <span>AvaSwarm</span>
+    </div>
+    <div class="spacer"></div>
+    {% block topbar_extra %}{% endblock %}
+    {% if back_url %}
+    <a href="{{ back_url }}" class="back-btn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><polyline points="15 18 9 12 15 6"/></svg>
+      Back
+    </a>
+    {% endif %}
+    <!-- Avanade brand logo (right) -->
+    <div class="avanade-brand">
+      <svg viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg" width="32" height="32" aria-hidden="true">
+        <!-- Avanade knot mark — three interlocked loops -->
+        <path d="M28 10
+          C22 10 17 14.5 17 20.5
+          C17 24.5 19.2 27.8 22.5 29.5
+          C19.5 30.8 17 34 17 37.5
+          C17 43 21.5 47 27 47
+          C30 47 32.7 45.7 34.5 43.5"
+          stroke="#FF6200" stroke-width="2.8" stroke-linecap="round" fill="none"/>
+        <path d="M28 10
+          C34 10 39 14.5 39 20.5
+          C39 24.5 36.8 27.8 33.5 29.5
+          C36.5 30.8 39 34 39 37.5
+          C39 43 34.5 47 29 47
+          C26 47 23.3 45.7 21.5 43.5"
+          stroke="#CC0000" stroke-width="2.8" stroke-linecap="round" fill="none"/>
+        <path d="M18 22 C22 18 28 17 34 19 C38 20.5 40 24 39 28
+                 C38 32 34 34.5 28 35 C22 35.5 17 33 17 28"
+          stroke="#FF8C00" stroke-width="2" stroke-linecap="round" fill="none" opacity=".6"/>
+      </svg>
+      <span class="avanade-brand-text">avanade</span>
+    </div>
+  </header>
+
+  <main class="content">
+    {% block content %}{% endblock %}
+  </main>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+function showToast(msg, type='ok', ms=2800){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = `toast ${type} show`;
+  setTimeout(()=>{ t.className='toast'; }, ms);
+}
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Swarm — Scheduler{% endblock %}
+{% set back_url = "/" %}
+
+{% block content %}
+<div class="form-page">
+  <h2>Scheduler</h2>
+  <p class="subtitle">Active cron and interval jobs. Jobs persist until the agent is restarted.</p>
+
+  <div class="section-title">Active jobs</div>
+
+  <div id="jobs-list">
+    {% if jobs %}
+      {% for job in jobs %}
+      <div class="job-card" style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px 16px;margin-bottom:10px;display:flex;align-items:center;gap:12px">
+        <div style="flex:1">
+          <div style="font-weight:600;color:var(--accent)">{{ job.id }}</div>
+          <div style="font-size:.82rem;color:var(--muted);margin-top:3px">Trigger: {{ job.trigger }}</div>
+          <div style="font-size:.82rem;color:var(--muted)">Next run: {{ job.next_run }}</div>
+        </div>
+        <button class="btn btn-danger" style="font-size:.8rem;padding:6px 14px" onclick="removeJob('{{ job.id }}')">Remove</button>
+      </div>
+      {% endfor %}
+    {% else %}
+      <p style="color:var(--muted);font-size:.9rem">No scheduled jobs.</p>
+    {% endif %}
+  </div>
+
+  <div class="section-title">Add new cron job</div>
+  <div class="row-2">
+    <div class="field">
+      <label>Job ID</label>
+      <input id="new-job-id" type="text" placeholder="e.g. daily_summary"/>
+    </div>
+    <div class="field">
+      <label>Cron expression <span style="color:var(--muted);font-size:.78em">m h d M dow</span></label>
+      <input id="new-cron" type="text" placeholder="0 9 * * 1-5"/>
+    </div>
+  </div>
+  <div class="field">
+    <label>Task message (sent to the agent)</label>
+    <input id="new-task" type="text" placeholder="e.g. Generate a daily stand-up summary"/>
+  </div>
+  <div class="actions">
+    <button class="btn btn-primary" onclick="addJob()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      Add job
+    </button>
+    <a href="/" class="btn btn-secondary">Back</a>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function removeJob(id){
+  const r = await fetch('/api/jobs/'+encodeURIComponent(id), {method:'DELETE'});
+  const d = await r.json();
+  if(d.ok){ showToast('Job removed'); setTimeout(()=>location.reload(),700); }
+  else showToast(d.error||'Error','error');
+}
+
+async function addJob(){
+  const id   = document.getElementById('new-job-id').value.trim();
+  const cron = document.getElementById('new-cron').value.trim();
+  const task = document.getElementById('new-task').value.trim();
+  if(!id||!cron||!task){ showToast('All fields required','error'); return; }
+  const r = await fetch('/api/jobs', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({id, cron, task}),
+  });
+  const d = await r.json();
+  if(d.ok){ showToast('Job added'); setTimeout(()=>location.reload(),700); }
+  else showToast(d.error||'Error','error');
+}
+</script>
+{% endblock %}

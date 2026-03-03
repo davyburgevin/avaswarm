@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}Instructions — {{ agent_name }} — AvaSwarm{% endblock %}
+{% set back_url = "/agents?agent=" ~ agent_name %}
+
+{% block content %}
+<div class="ca-page">
+  <div class="ca-modal" style="max-width:760px">
+
+    <!-- Header -->
+    <div class="ca-modal-hd">
+      <div>
+        <h2 class="ca-modal-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round" width="20" height="20"
+               style="vertical-align:-4px;margin-right:6px;opacity:.75">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+          </svg>
+          {{ agent_name }}
+        </h2>
+        <p class="ca-modal-desc">Edit the system instructions stored in <code>agent.md</code>. Changes take effect on the next chat session.</p>
+      </div>
+    </div>
+
+    <!-- Body -->
+    <div class="ca-modal-bd">
+      <div class="ca-field">
+        <div class="ca-field-hd">Instructions (agent.md)</div>
+        <div class="ca-field-sub">Describe the agent's role, behaviour and tools. Markdown is supported.</div>
+        <textarea id="instrEditor" class="ca-ta ca-ta--code" rows="22"
+                  placeholder="## Your Role&#10;You are…">{{ content | e }}</textarea>
+        <div id="saveError" class="ca-field-err" hidden></div>
+      </div>
+
+      <!-- Footer -->
+      <div class="ca-modal-ft">
+        <a href="/agents?agent={{ agent_name }}" class="btn btn-secondary" id="cancelBtn">Cancel</a>
+        <button class="btn btn-primary" id="saveBtn" onclick="saveInstructions()">Save</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const AGENT_NAME = {{ agent_name | tojson }};
+
+async function saveInstructions(){
+  const btn = document.getElementById('saveBtn');
+  const errEl = document.getElementById('saveError');
+  errEl.hidden = true;
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+
+  const content = document.getElementById('instrEditor').value;
+  try {
+    const r = await fetch('/api/agents/' + encodeURIComponent(AGENT_NAME) + '/instructions', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ content })
+    }).then(r => r.json());
+
+    if (r.ok) {
+      window.location.href = '/agents?agent=' + encodeURIComponent(AGENT_NAME);
+    } else {
+      errEl.textContent = r.error || 'Unknown error';
+      errEl.hidden = false;
+      btn.disabled = false;
+      btn.textContent = 'Save';
+    }
+  } catch (err) {
+    errEl.textContent = 'Network error — please try again.';
+    errEl.hidden = false;
+    btn.disabled = false;
+    btn.textContent = 'Save';
+  }
+}
+
+// Ctrl+S / Cmd+S shortcut
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+    e.preventDefault();
+    saveInstructions();
+  }
+});
+</script>
+{% endblock %}

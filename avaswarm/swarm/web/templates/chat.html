@@ -1,0 +1,287 @@
+{% extends "base.html" %}
+{% block title %}Swarm — Chat{% endblock %}
+{% set back_url = "/" %}
+
+{% block topbar_extra %}
+<div style="display:flex;align-items:center;gap:8px">
+  <span style="color:var(--muted);font-size:.82rem">Session:</span>
+  <span style="color:var(--accent);font-size:.82rem;font-family:monospace" id="session-display">—</span>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="chat-page">
+
+  <div class="chat-header-bar">
+    <span class="agent-badge">● Swarm Online</span>
+    <span class="model-badge" id="model-badge">{{ model }}</span>
+    <div class="spacer"></div>
+    <button class="clear-btn" onclick="clearChat()">Clear</button>
+  </div>
+
+  <div id="messages"></div>
+
+  <div id="thinking" class="thinking-bar" style="display:none">
+    <span>Swarm is thinking</span>
+    <span class="dots"><span></span><span></span><span></span></span>
+  </div>
+
+  <div class="chat-input-zone">
+    <textarea id="prompt" placeholder="Type a message…" rows="2" onkeydown="onKey(event)"></textarea>
+    <div class="input-actions">
+      <span class="kbd-hint"><kbd>Enter</kbd> send &nbsp;·&nbsp; <kbd>Shift+Enter</kbd> newline</span>
+      <!-- Context ring -->
+      <div class="ctx-wrap" id="ctxWrap">
+        <svg width="26" height="26" viewBox="0 0 26 26">
+          <circle class="ctx-ring-bg" cx="13" cy="13" r="10"/>
+          <circle class="ctx-ring-arc" id="ctxArc" cx="13" cy="13" r="10"
+                  stroke="#2ea87f"
+                  stroke-dasharray="62.83"
+                  stroke-dashoffset="62.83"/>
+        </svg>
+        <div class="ctx-tip" id="ctxTip">
+          <div class="ctx-tip-title">
+            <span>Context Window</span>
+            <span id="ctxPctLabel">0%</span>
+          </div>
+          <div class="ctx-tip-bar"><div class="ctx-tip-bar-fill" id="ctxBar" style="width:0%;background:#2ea87f"></div></div>
+          <div style="color:var(--muted);font-size:.78rem;margin-bottom:8px" id="ctxTokenLabel">—</div>
+          <div class="ctx-tip-row"><span>System instructions</span><span id="ctxSys">—</span></div>
+          <div class="ctx-tip-row"><span>Messages</span><span id="ctxMsgs">—</span></div>
+          <div class="ctx-tip-row" id="ctxToolRow" style="display:none"><span>Tool results</span><span id="ctxTools">—</span></div>
+          <div class="ctx-tip-warn" id="ctxWarn">Quality may decline as limit nears.</div>
+        </div>
+      </div>
+      <button class="send-btn" id="send-btn" onclick="sendMessage()" title="Send">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="22" y1="2" x2="11" y2="13"/>
+          <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ---- State ----
+// Persist session id so returning to the chat keeps the same session
+let SESSION_ID = localStorage.getItem('ava_session_id');
+if(!SESSION_ID){
+  SESSION_ID = crypto.randomUUID();
+  localStorage.setItem('ava_session_id', SESSION_ID);
+}
+let ws = null;
+let isStreaming = false;
+
+document.getElementById('session-display').textContent = SESSION_ID.slice(0,8)+'…';
+
+// ---- WebSocket ----
+function connect(){
+  ws = new WebSocket(`ws://${location.host}/ws/${SESSION_ID}`);
+
+  ws.onopen = () => console.log('WS connected');
+
+  ws.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+    if(data.type === 'start'){
+      isStreaming = true;
+      setThinking(false);
+      addAgentBubble('');
+    } else if(data.type === 'chunk'){
+      appendToLastBubble(data.text);
+    } else if(data.type === 'end'){
+      isStreaming = false;
+      finaliseLastBubble();
+      enableInput();
+    } else if(data.type === 'ctx'){
+      updateCtxRing(data);
+    } else if(data.type === 'error'){
+      isStreaming = false;
+      setThinking(false);
+      const detail = data.detail ? '\n\n' + data.detail.split('\n').slice(-4).join('\n') : '';
+      addSystemMsg('Error: ' + data.message + detail, true);
+      enableInput();
+    }
+  };
+
+  ws.onclose = () => {
+    if(isStreaming){ addSystemMsg('Connection lost. Reconnecting…', true); }
+    setTimeout(connect, 2000);
+  };
+
+  ws.onerror = () => ws.close();
+}
+
+// ---- Send ----
+function sendMessage(){
+  const ta  = document.getElementById('prompt');
+  const msg = ta.value.trim();
+  if(!msg || isStreaming) return;
+
+  addUserBubble(msg);
+  ta.value = '';
+  ta.style.height = 'auto';
+  disableInput();
+  setThinking(true);
+
+  if(ws && ws.readyState === WebSocket.OPEN){
+    ws.send(JSON.stringify({message: msg}));
+  } else {
+    addSystemMsg('Not connected — retrying…', true);
+    enableInput();
+  }
+}
+
+function onKey(e){
+  if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendMessage(); }
+  // auto-resize
+  const ta = e.target;
+  ta.style.height = 'auto';
+  ta.style.height = Math.min(ta.scrollHeight, 200)+'px';
+}
+
+function clearChat(){
+  // start a fresh session (generate new id), clear UI and reconnect
+  const msgs = document.getElementById('messages');
+  msgs.innerHTML = '';
+  // create new session id and persist it
+  SESSION_ID = crypto.randomUUID();
+  localStorage.setItem('ava_session_id', SESSION_ID);
+  document.getElementById('session-display').textContent = SESSION_ID.slice(0,8)+'…';
+  showToast('Chat cleared — new session created');
+  // reconnect websocket to the new session
+  try{ if(ws) ws.close(); }catch(e){}
+  setTimeout(connect, 250);
+}
+
+// ---- DOM helpers ----
+let lastAgentBubble = null;
+let rawTextBuffer   = '';
+
+function addUserBubble(text){
+  const msgs = document.getElementById('messages');
+  const div = document.createElement('div');
+  div.className = 'msg user';
+  div.innerHTML = `<div class="label">You</div><div class="bubble">${escHtml(text)}</div>`;
+  msgs.appendChild(div);
+  scrollBottom();
+}
+
+function addAgentBubble(text){
+  const msgs = document.getElementById('messages');
+  const div = document.createElement('div');
+  div.className = 'msg agent';
+  div.innerHTML = `<div class="label">Swarm</div><div class="bubble"></div>`;
+  msgs.appendChild(div);
+  lastAgentBubble = div.querySelector('.bubble');
+  rawTextBuffer = text;
+  lastAgentBubble.textContent = text;
+  scrollBottom();
+}
+
+function appendToLastBubble(chunk){
+  if(!lastAgentBubble) addAgentBubble('');
+  rawTextBuffer += chunk;
+  lastAgentBubble.textContent = rawTextBuffer;
+  scrollBottom();
+}
+
+function finaliseLastBubble(){
+  if(!lastAgentBubble) return;
+  // Render markdown-lite
+  lastAgentBubble.innerHTML = renderMd(rawTextBuffer);
+  lastAgentBubble = null;
+  rawTextBuffer   = '';
+  scrollBottom();
+}
+
+function addSystemMsg(text, isError=false){
+  const msgs = document.getElementById('messages');
+  const div = document.createElement('div');
+  div.style.cssText = `text-align:center;font-size:.8rem;color:${isError?'var(--danger)':'var(--muted)'};padding:4px 0;`;
+  div.textContent = text;
+  msgs.appendChild(div);
+  scrollBottom();
+}
+
+function setThinking(v){
+  document.getElementById('thinking').style.display = v ? 'flex' : 'none';
+}
+
+function disableInput(){
+  document.getElementById('send-btn').disabled = true;
+  document.getElementById('prompt').disabled = true;
+}
+function enableInput(){
+  document.getElementById('send-btn').disabled = false;
+  const ta = document.getElementById('prompt');
+  ta.disabled = false;
+  ta.focus();
+}
+
+function scrollBottom(){
+  const m = document.getElementById('messages');
+  m.scrollTop = m.scrollHeight;
+}
+
+// ---- Escape & lightweight markdown ----
+function escHtml(s){
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function renderMd(text){
+  let s = escHtml(text);
+  // code blocks
+  s = s.replace(/```(\w*)\n?([\s\S]*?)```/g,
+    (_,lang,code)=>`<pre><code class="lang-${lang}">${code.trim()}</code></pre>`);
+  // inline code
+  s = s.replace(/`([^`]+)`/g,'<code>$1</code>');
+  // bold
+  s = s.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');
+  // italic
+  s = s.replace(/\*(.+?)\*/g,'<em>$1</em>');
+  // headings
+  s = s.replace(/^### (.+)$/gm,'<h4 style="margin:.6em 0 .3em">$1</h4>');
+  s = s.replace(/^## (.+)$/gm,'<h3 style="margin:.6em 0 .3em">$1</h3>');
+  s = s.replace(/^# (.+)$/gm,'<h2 style="margin:.6em 0 .3em">$1</h2>');
+  // lists
+  s = s.replace(/^[-*] (.+)$/gm,'<li>$1</li>');
+  s = s.replace(/(<li>.*<\/li>)/s,'<ul style="padding-left:1.4em;margin:.4em 0">$1</ul>');
+  // line breaks
+  s = s.replace(/\n{2,}/g,'<br/><br/>');
+  s = s.replace(/\n/g,'<br/>');
+  return s;
+}
+
+// ── Context ring ──────────────────────────────────────
+const CTX_CIRC = 62.83;
+function updateCtxRing(d){
+  const pct = d.pct || 0;
+  const color = pct < 50 ? '#2ea87f' : pct < 75 ? '#FF8C00' : pct < 90 ? '#FF6200' : '#CC0000';
+  const arc = document.getElementById('ctxArc');
+  if(arc){
+    arc.style.stroke = color;
+    arc.setAttribute('stroke-dashoffset', (CTX_CIRC * (1 - pct/100)).toFixed(2));
+  }
+  const fmt = n => n >= 1000 ? (n/1000).toFixed(1)+'K' : String(n);
+  const el  = id => document.getElementById(id);
+  if(el('ctxPctLabel'))   el('ctxPctLabel').textContent   = pct+'%';
+  if(el('ctxBar'))        { el('ctxBar').style.width = pct+'%'; el('ctxBar').style.background = color; }
+  if(el('ctxTokenLabel')) el('ctxTokenLabel').textContent = fmt(d.used)+' / '+fmt(d.limit)+' tokens';
+  if(el('ctxSys'))        el('ctxSys').textContent   = d.system   ? fmt(d.system)   : '—';
+  if(el('ctxMsgs'))       el('ctxMsgs').textContent  = d.messages ? fmt(d.messages) : '—';
+  if(el('ctxTools') && d.tools > 0){
+    el('ctxToolRow').style.display = '';
+    el('ctxTools').textContent = fmt(d.tools);
+  }
+  if(el('ctxWarn'))       el('ctxWarn').style.display = pct >= 75 ? '' : 'none';
+}
+
+// ---- Init ----
+connect();
+document.getElementById('prompt').focus();
+</script>
+{% endblock %}

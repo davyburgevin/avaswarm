@@ -1,0 +1,652 @@
+{% extends "base.html" %}
+{% block title %}Agents — AvaSwarm{% endblock %}
+{% set back_url = "/" %}
+
+{% block content %}
+<div class="agents-layout">
+
+  <!-- ── LEFT SIDEBAR ── -->
+  <aside class="agents-sidebar">
+
+    <button id="createBtn" class="btn btn-primary" style="width:100%;margin-bottom:8px;display:flex;align-items:center;gap:8px;justify-content:center">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      Create agent
+    </button>
+    <button id="deleteAgentBtn" class="btn btn-danger" disabled style="width:100%;margin-bottom:14px;display:flex;align-items:center;gap:8px;justify-content:center">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+      Delete agent
+    </button>
+
+    <div style="margin-bottom:14px">
+      <label class="agents-select-label">Agent</label>
+      <select id="agentsSelect" class="agents-select">
+        <option value="">— select an agent —</option>
+      </select>
+    </div>
+
+    <!-- Docs panel -->
+    <div class="agents-docs-panel">
+      <div class="agents-docs-header">
+        <span>Documents</span>
+        <span id="docsCount" class="docs-badge">0</span>
+      </div>
+      <ul id="docsList" class="docs-list">
+        <li class="docs-empty">No agent selected.</li>
+      </ul>
+      <div class="agents-docs-actions">
+        <button id="addDocBtn" class="btn btn-secondary" style="flex:1" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Add
+        </button>
+        <button id="delDocBtn" class="btn btn-danger" style="flex:1" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+          Delete
+        </button>
+      </div>
+    </div>
+
+    <!-- Review instructions button -->
+    <button id="reviewInstrBtn" class="btn btn-secondary" disabled
+            style="width:100%;margin-top:12px;display:flex;align-items:center;gap:8px;justify-content:center">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="15" height="15"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+      Review Agent Instructions
+    </button>
+
+  </aside>
+
+  <!-- ── RIGHT: CHAT ── -->
+  <section class="agents-chat-wrap">
+
+    <!-- empty-state -->
+    <div id="chatEmpty" class="agents-chat-empty">
+      <svg viewBox="0 0 48 48" fill="none" width="56" height="56" stroke="currentColor" stroke-width="1.5">
+        <path d="M24 6a6 6 0 0 1 6 6v2h2a4 4 0 0 1 4 4v4a12 12 0 0 1-12 12h-4a12 12 0 0 1-12-12v-4a4 4 0 0 1 4-4h2V12a6 6 0 0 1 6-6z" stroke="#FF6200" opacity=".6"/>
+        <circle cx="20" cy="20" r="2" fill="#FF6200" opacity=".7"/>
+        <circle cx="28" cy="20" r="2" fill="#FF6200" opacity=".7"/>
+        <path d="M20 28s1.5 3 4 3 4-3 4-3" stroke="#FF6200" opacity=".7" stroke-linecap="round"/>
+      </svg>
+      <p>Select or create an agent to start chatting.</p>
+    </div>
+
+    <!-- chat ui — shown once an agent is selected -->
+    <div id="chatPane" class="agents-chat-pane" style="display:none">
+      <div class="agents-chat-header">
+        <span class="agent-badge" id="chatAgentBadge">● Agent</span>
+        <span class="model-badge" id="chatModelBadge">—</span>
+        <div class="spacer"></div>
+        <button class="clear-btn" onclick="clearAgentChat()">Clear</button>
+      </div>
+
+      <div id="agentMessages" class="agents-messages"></div>
+
+      <div id="agentThinking" class="thinking-bar" style="display:none">
+        <span>Thinking</span>
+        <span class="dots"><span></span><span></span><span></span></span>
+      </div>
+
+      <div class="chat-input-zone">
+        <textarea id="agentPrompt" placeholder="Message this agent…" rows="2"
+                  onkeydown="onAgentKey(event)"></textarea>
+        <!-- hidden file input for doc upload -->
+        <input type="file" id="docFileInput" style="display:none" accept=".txt,.md,.csv,.json,.xml,.html,.py,.js,.ts,.yaml,.yml,.log,.rst,.toml,.ini,.cfg,.pptx,.ppt,.docx,.doc,.xlsx,.xls,.pdf" multiple>
+        <div class="input-actions">
+          <span class="kbd-hint"><kbd>Enter</kbd> send &nbsp;·&nbsp; <kbd>Shift+Enter</kbd> newline</span>
+          <!-- Context ring -->
+          <div class="ctx-wrap" id="agentCtxWrap">
+            <svg width="26" height="26" viewBox="0 0 26 26">
+              <circle class="ctx-ring-bg" cx="13" cy="13" r="10"/>
+              <circle class="ctx-ring-arc" id="agentCtxArc" cx="13" cy="13" r="10"
+                      stroke="#2ea87f" stroke-dasharray="62.83" stroke-dashoffset="62.83"/>
+            </svg>
+            <div class="ctx-tip">
+              <div class="ctx-tip-title"><span>Context Window</span><span id="agentCtxPct">0%</span></div>
+              <div class="ctx-tip-bar"><div class="ctx-tip-bar-fill" id="agentCtxBar" style="width:0%;background:#2ea87f"></div></div>
+              <div style="color:var(--muted);font-size:.78rem;margin-bottom:8px" id="agentCtxTokenLabel">—</div>
+              <div class="ctx-tip-row"><span>System instructions</span><span id="agentCtxSys">—</span></div>
+              <div class="ctx-tip-row"><span>Messages</span><span id="agentCtxMsgs">—</span></div>
+              <div class="ctx-tip-row" id="agentCtxToolRow" style="display:none"><span>Tool results</span><span id="agentCtxTools">—</span></div>
+              <div class="ctx-tip-warn" id="agentCtxWarn">Quality may decline as limit nears.</div>
+            </div>
+          </div>
+          <!-- Upload doc button -->
+          <button class="icon-btn" id="uploadDocBtn" title="Add document to library" onclick="document.getElementById('docFileInput').click()" disabled>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18">
+              <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+            </svg>
+          </button>
+          <button class="send-btn" id="agentSendBtn" onclick="sendAgentMessage()" title="Send">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" stroke="white">
+              <line x1="22" y1="2" x2="11" y2="13"/>
+              <polygon points="22 2 15 22 11 13 2 9 22 2" fill="white"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ── State ──
+let currentAgent   = null;
+let selectedDoc    = null;
+let agentWs        = null;
+let agentStreaming  = false;
+let agentSessionId = null;
+let lastAgentBubble = null;
+let rawBuf = '';
+
+// Per-agent message history (agent name → innerHTML of #agentMessages)
+const agentMsgBuffers = {};
+
+function _saveCurrentMessages(){
+  if(currentAgent){
+    agentMsgBuffers[currentAgent] = document.getElementById('agentMessages').innerHTML;
+  }
+}
+function _restoreMessages(name){
+  const m = document.getElementById('agentMessages');
+  m.innerHTML = agentMsgBuffers[name] || '';
+  m.scrollTop = m.scrollHeight;
+}
+
+// ── Escape helper ──
+function esc(s){ const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+
+function renderMd(t){
+  return t
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/```([\s\S]*?)```/g,'<pre><code>$1</code></pre>')
+    .replace(/`([^`]+)`/g,'<code>$1</code>')
+    .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g,'<em>$1</em>')
+    .replace(/\n/g,'<br>');
+}
+
+// ── Agents list ──
+async function loadAgents(){
+  const sel = document.getElementById('agentsSelect');
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">— select an agent —</option>';
+  const r = await fetch('/api/agents').then(r=>r.json());
+  if(r.ok) r.agents.forEach(a=>{
+    const o = document.createElement('option');
+    o.value = a.name; o.textContent = a.name;
+    if(a.name === prev) o.selected = true;
+    sel.appendChild(o);
+  });
+}
+
+// ── Create agent ──
+document.getElementById('createBtn').addEventListener('click', ()=>{
+  window.location.href = '/agents/new';
+});
+
+// ── Delete agent ──
+document.getElementById('deleteAgentBtn').addEventListener('click', async ()=>{
+  if(!currentAgent) return;
+  if(!confirm('Delete agent "'+currentAgent+'" and all its data? This cannot be undone.')) return;
+  const name = currentAgent;
+  const r = await fetch('/api/agents/'+encodeURIComponent(name),{method:'DELETE'}).then(r=>r.json());
+  if(r.ok){
+    showToast('Agent "'+name+'" deleted','ok');
+    delete agentMsgBuffers[name];
+    clearAgentView();
+    document.getElementById('deleteAgentBtn').disabled = true;
+    await loadAgents();
+  } else {
+    showToast('Error: '+(r.error||'unknown'),'error');
+  }
+});
+
+// ── Select agent ──
+document.getElementById('agentsSelect').addEventListener('change', async ev=>{
+  const n = ev.target.value;
+  if(n) await selectAgent(n); else clearAgentView();
+});
+
+async function selectAgent(name){
+  // Save current agent's messages before switching
+  _saveCurrentMessages();
+
+  currentAgent = name;
+  selectedDoc  = null;
+  lastAgentBubble = null;
+  rawBuf = '';
+  agentStreaming = false;
+
+  document.getElementById('chatEmpty').style.display = 'none';
+  document.getElementById('chatPane').style.display  = 'flex';
+  document.getElementById('chatAgentBadge').textContent = '● '+name;
+
+  // Restore from in-memory buffer first (fast path — already rendered)
+  _restoreMessages(name);
+
+  // Then reload from server session so history survives page refresh
+  // Only reload if buffer was empty (first visit or after page reload)
+  if(!agentMsgBuffers[name]){
+    const sid = localStorage.getItem('ava_agent_session_'+name);
+    if(sid){
+      const hr = await fetch('/api/agents/'+encodeURIComponent(name)+'/session/'+encodeURIComponent(sid)+'/history')
+        .then(r=>r.json()).catch(()=>({ok:false}));
+      if(hr.ok && hr.messages.length){
+        const m = document.getElementById('agentMessages');
+        m.innerHTML = '';
+        hr.messages.forEach(msg=>{
+          if(msg.role==='user') _addUserBubbleStatic(msg.content);
+          else if(msg.role==='assistant') _addAgentBubbleStatic(name, msg.content);
+        });
+        agentMsgBuffers[name] = m.innerHTML;
+        scrollAgentBottom();
+      }
+    }
+  }
+
+  const cfg = await fetch('/api/agents/'+name+'/config').then(r=>r.json()).catch(()=>({}));
+  if(cfg.ok) document.getElementById('chatModelBadge').textContent = cfg.config.model || '—';
+
+  document.getElementById('addDocBtn').disabled = false;
+  document.getElementById('delDocBtn').disabled = true;
+  document.getElementById('deleteAgentBtn').disabled = false;
+  document.getElementById('uploadDocBtn').disabled = false;
+  document.getElementById('reviewInstrBtn').disabled = false;
+
+  await loadDocs(name);
+  connectAgentWs(name);
+}
+
+function clearAgentView(){
+  _saveCurrentMessages();
+  currentAgent = null;
+  document.getElementById('chatEmpty').style.display='flex';
+  document.getElementById('chatPane').style.display ='none';
+  document.getElementById('agentMessages').innerHTML='';
+  document.getElementById('docsList').innerHTML = '<li class="docs-empty">No agent selected.</li>';
+  document.getElementById('docsCount').textContent='0';
+  document.getElementById('addDocBtn').disabled=true;
+  document.getElementById('delDocBtn').disabled=true;
+  document.getElementById('deleteAgentBtn').disabled=true;
+  document.getElementById('uploadDocBtn').disabled=true;
+  document.getElementById('reviewInstrBtn').disabled=true;
+  if(agentWs){ try{agentWs.close();}catch(e){} agentWs=null; }
+}
+
+// ── Review instructions ──
+document.getElementById('reviewInstrBtn').addEventListener('click', ()=>{
+  if(!currentAgent) return;
+  window.location.href = '/agents/'+encodeURIComponent(currentAgent)+'/instructions';
+});
+
+// ── Docs ──
+async function loadDocs(name){
+  const r = await fetch('/api/agents/'+name+'/docs').then(r=>r.json());
+  const ul = document.getElementById('docsList');
+  ul.innerHTML='';
+  document.getElementById('docsCount').textContent = r.ok ? r.docs.length : 0;
+  if(!r.ok || r.docs.length===0){
+    ul.innerHTML='<li class="docs-empty">No documents yet.</li>'; return;
+  }
+  r.docs.forEach(d=>{
+    const li = document.createElement('li');
+    li.className = 'docs-item';
+    li.dataset.name = d.name;
+    li.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13" style="flex-shrink:0"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.name)}</span><span class="doc-size">${(d.size/1024).toFixed(1)}kb</span>`;
+    li.addEventListener('click', ()=>{
+      document.querySelectorAll('.docs-item').forEach(i=>i.classList.remove('active'));
+      li.classList.add('active');
+      selectedDoc = d.name;
+      document.getElementById('delDocBtn').disabled = false;
+    });
+    ul.appendChild(li);
+  });
+}
+
+document.getElementById('addDocBtn').addEventListener('click', async ()=>{
+  if(!currentAgent) return;
+  const filename = prompt('Document filename (e.g. instructions.txt):');
+  if(!filename) return;
+  const content = prompt('Paste document content (or leave empty):') || '';
+  const r = await fetch('/api/agents/'+currentAgent+'/docs',{
+    method:'POST', headers:{'content-type':'application/json'},
+    body:JSON.stringify({filename, content})
+  }).then(r=>r.json());
+  if(r.ok){ showToast('Document added','ok'); await loadDocs(currentAgent); }
+  else showToast('Error: '+(r.error||'unknown'),'error');
+});
+
+document.getElementById('delDocBtn').addEventListener('click', async ()=>{
+  if(!currentAgent || !selectedDoc) return;
+  if(!confirm('Delete "'+selectedDoc+'"?')) return;
+  const r = await fetch('/api/agents/'+currentAgent+'/docs/'+encodeURIComponent(selectedDoc),{method:'DELETE'}).then(r=>r.json());
+  if(r.ok){ showToast('Deleted','ok'); selectedDoc=null; document.getElementById('delDocBtn').disabled=true; await loadDocs(currentAgent); }
+  else showToast('Error: '+(r.error||'unknown'),'error');
+});
+
+// ── File upload (shared) ──
+async function uploadDocFile(file){
+  if(!file || !currentAgent) return;
+  showToast('Upload… ' + file.name, 'ok');
+  try {
+    const fd = new FormData();
+    fd.append('file', file, file.name);
+    const r = await fetch('/api/agents/'+currentAgent+'/docs/upload',{
+      method: 'POST',
+      body: fd
+    }).then(r=>r.json());
+    if(r.ok){
+      showToast('✓ ' + r.filename + ' ajouté à la bibliothèque', 'ok');
+      await loadDocs(currentAgent);
+    } else {
+      showToast('Erreur : '+(r.error||'inconnue'),'error');
+    }
+  } catch(e) {
+    showToast('Erreur upload','error');
+  }
+}
+
+// ── File input click handler ──
+document.getElementById('docFileInput').addEventListener('change', async function(){
+  const file = this.files[0];
+  this.value = '';
+  await uploadDocFile(file);
+});
+
+// ── Drag & drop onto chat input zone ──
+(function(){
+  const zone = document.querySelector('#chatPane .chat-input-zone');
+  if(!zone) return;
+  let dragCounter = 0;
+  zone.addEventListener('dragenter', e=>{
+    e.preventDefault();
+    dragCounter++;
+    zone.classList.add('drag-over');
+  });
+  zone.addEventListener('dragleave', e=>{
+    dragCounter--;
+    if(dragCounter <= 0){ dragCounter=0; zone.classList.remove('drag-over'); }
+  });
+  zone.addEventListener('dragover', e=>{ e.preventDefault(); e.dataTransfer.dropEffect='copy'; });
+  zone.addEventListener('drop', async e=>{
+    e.preventDefault();
+    dragCounter = 0;
+    zone.classList.remove('drag-over');
+    if(!currentAgent){ showToast('Select an agent first','error'); return; }
+    const files = [...e.dataTransfer.files];
+    for(const f of files) await uploadDocFile(f);
+  });
+})();
+
+// ── WebSocket per-agent ──
+let _toolStepsDiv = null;    // current .tool-steps element
+let _pendingSteps = [];      // queue of step <div>s awaiting their result
+let _thinkingStart = 0;      // timestamp when thinking block was created
+let _thinkingTextEl = null;  // <div class="ts-text"> live-text container
+let _thinkingTextBuf = '';   // text from the *current* LLM iteration (resets on tool_call)
+let _toolCount = 0;          // total tool calls in this exchange
+
+function _resetToolSteps(){
+  _toolStepsDiv = null;
+  _pendingSteps = [];
+  _thinkingStart = 0;
+  _thinkingTextEl = null;
+  _thinkingTextBuf = '';
+  _toolCount = 0;
+}
+
+function _ensureThinkingBlock(){
+  if(_toolStepsDiv) return;
+  _thinkingStart = Date.now();
+  _toolStepsDiv = document.createElement('div');
+  _toolStepsDiv.className = 'tool-steps';
+  _toolStepsDiv.innerHTML =
+    `<details open>
+      <summary>
+        <svg class="ts-spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+        </svg>
+        <span class="ts-label">R\u00e9flexion\u2026</span>
+      </summary>
+      <div class="ts-text"></div>
+      <div class="ts-steps"></div>
+    </details>`;
+  document.getElementById('agentMessages').appendChild(_toolStepsDiv);
+  _thinkingTextEl = _toolStepsDiv.querySelector('.ts-text');
+  scrollAgentBottom();
+}
+
+function _appendThinkingText(text){
+  _ensureThinkingBlock();
+  _thinkingTextEl.textContent += text;
+  // Auto-scroll within the thinking text box
+  _thinkingTextEl.scrollTop = _thinkingTextEl.scrollHeight;
+  scrollAgentBottom();
+}
+
+function _addToolCallStep(name){
+  _ensureThinkingBlock();
+  _toolCount++;
+  const label = _toolStepsDiv.querySelector('.ts-label');
+  if(label) label.textContent = 'Utilisation des outils\u2026';
+  const step = document.createElement('div');
+  step.className = 'tool-step pending';
+  step.innerHTML = `<span class="ts-check">&#8635;</span><span class="ts-name">${esc(name)}</span>`;
+  _toolStepsDiv.querySelector('.ts-steps').appendChild(step);
+  _pendingSteps.push(step);
+  scrollAgentBottom();
+}
+
+function _resolveToolStep(result, ok){
+  const step = _pendingSteps.shift();
+  if(!step) return;
+  step.classList.remove('pending');
+  step.classList.add(ok ? 'done' : 'error');
+  step.querySelector('.ts-check').textContent = ok ? '\u2713' : '\u2717';
+  const res = document.createElement('span');
+  res.className = 'ts-result';
+  res.textContent = '\u2192 ' + result;
+  step.appendChild(res);
+  scrollAgentBottom();
+}
+
+function _closeToolSteps(count){
+  if(!_toolStepsDiv) return;
+  const details = _toolStepsDiv.querySelector('details');
+  details.setAttribute('data-done','');
+  details.removeAttribute('open');
+  const label = details.querySelector('.ts-label');
+  if(label) label.textContent = 'Used ' + count + ' tool' + (count===1?'':'s');
+}
+
+function connectAgentWs(name){
+  if(agentWs){ try{agentWs.close();}catch(e){} agentWs=null; }
+  agentSessionId = localStorage.getItem('ava_agent_session_'+name);
+  if(!agentSessionId){
+    agentSessionId = crypto.randomUUID();
+    localStorage.setItem('ava_agent_session_'+name, agentSessionId);
+  }
+  agentWs = new WebSocket(`ws://${location.host}/ws/agents/${encodeURIComponent(name)}/${agentSessionId}`);
+  agentWs.onopen  = ()=>console.log('WS open for agent: '+name);
+  agentWs.onmessage = ev=>{
+    const d = JSON.parse(ev.data);
+    if(d.type==='thinking_start'){
+      // Block already shown by sendAgentMessage; ensure if reconnected mid-stream
+      if(!_toolStepsDiv) _ensureThinkingBlock();
+    } else if(d.type==='thinking_text'){
+      // LLM tokens arriving in real-time (pre-final)
+      _thinkingTextBuf += d.text;
+      _appendThinkingText(d.text);
+    } else if(d.type==='tool_call'){
+      // New tool call → reset per-iteration text buffer, add step
+      _thinkingTextBuf = '';
+      _addToolCallStep(d.name);
+    } else if(d.type==='tool_result'){
+      _resolveToolStep(d.result, d.ok);
+    } else if(d.type==='final'){
+      // LLM is done — collapse thinking block and show final answer in a bubble
+      agentStreaming = false;
+      setAgentThinking(false);
+      if(_toolStepsDiv){
+        const details = _toolStepsDiv.querySelector('details');
+        details.setAttribute('data-done','');
+        details.removeAttribute('open');
+        const ms = Date.now() - _thinkingStart;
+        const label = details.querySelector('.ts-label');
+        if(d.had_tools){
+          if(label) label.textContent = 'Utilis\u00e9 '+_toolCount+' outil'+(_toolCount===1?'':'s')+' \u2014 '+ms+'ms';
+        } else {
+          if(label) label.textContent = 'R\u00e9flexion \u2014 '+ms+'ms';
+        }
+      }
+      // Create agent bubble with the last iteration's text
+      addAgentBubble(_thinkingTextBuf);
+      finaliseAgentBubble();
+    } else if(d.type==='end'){
+      _resetToolSteps(); enableAgentInput();
+    } else if(d.type==='ctx'){
+      updateAgentCtxRing(d);
+    } else if(d.type==='error'){
+      agentStreaming=false; setAgentThinking(false); _resetToolSteps();
+      addAgentSystem('Error: '+d.message, true); enableAgentInput();
+    }
+  };
+  agentWs.onclose = ()=>{
+    if(agentStreaming) addAgentSystem('Connection lost — reconnecting…',true);
+    if(currentAgent===name) setTimeout(()=>connectAgentWs(name), 2000);
+  };
+  agentWs.onerror = ()=>agentWs.close();
+}
+
+function sendAgentMessage(){
+  const ta = document.getElementById('agentPrompt');
+  const msg = ta.value.trim();
+  if(!msg || agentStreaming || !agentWs) return;
+  addUserAgentBubble(msg);
+  ta.value=''; ta.style.height='auto';
+  disableAgentInput();
+  // Show the thinking block immediately (before server confirms)
+  _resetToolSteps(); _ensureThinkingBlock();
+  if(agentWs.readyState===WebSocket.OPEN){
+    agentWs.send(JSON.stringify({message:msg}));
+  } else {
+    addAgentSystem('Not connected — retrying…',true); enableAgentInput(); _resetToolSteps();
+  }
+}
+
+function onAgentKey(e){
+  if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); sendAgentMessage(); }
+  const ta=e.target; ta.style.height='auto'; ta.style.height=Math.min(ta.scrollHeight,200)+'px';
+}
+
+function clearAgentChat(){
+  document.getElementById('agentMessages').innerHTML='';
+  if(currentAgent){
+    // Also wipe the saved buffer so the history is gone
+    agentMsgBuffers[currentAgent] = '';
+    agentSessionId=crypto.randomUUID();
+    localStorage.setItem('ava_agent_session_'+currentAgent, agentSessionId);
+    try{if(agentWs)agentWs.close();}catch(e){}
+    setTimeout(()=>connectAgentWs(currentAgent),250);
+  }
+  showToast('Chat cleared — new session');
+}
+
+// ── Bubble helpers ──
+function addUserAgentBubble(t){
+  const m=document.getElementById('agentMessages');
+  const d=document.createElement('div'); d.className='msg user';
+  d.innerHTML=`<div class="label">You</div><div class="bubble">${esc(t)}</div>`;
+  m.appendChild(d); scrollAgentBottom();
+}
+
+// Static versions used when replaying history (already-complete messages)
+function _addUserBubbleStatic(t){
+  const m=document.getElementById('agentMessages');
+  const d=document.createElement('div'); d.className='msg user';
+  d.innerHTML=`<div class="label">You</div><div class="bubble">${esc(t)}</div>`;
+  m.appendChild(d);
+}
+function _addAgentBubbleStatic(agentName, t){
+  const m=document.getElementById('agentMessages');
+  const d=document.createElement('div'); d.className='msg agent';
+  d.innerHTML=`<div class="label">${esc(agentName)}</div><div class="bubble">${renderMd(t)}</div>`;
+  m.appendChild(d);
+}
+
+function addAgentBubble(t){
+  const m=document.getElementById('agentMessages');
+  const d=document.createElement('div'); d.className='msg agent';
+  d.innerHTML=`<div class="label">${esc(currentAgent||'Agent')}</div><div class="bubble"></div>`;
+  m.appendChild(d);
+  lastAgentBubble=d.querySelector('.bubble'); rawBuf=t;
+  lastAgentBubble.textContent=t; scrollAgentBottom();
+}
+
+function appendToAgentBubble(chunk){
+  if(!lastAgentBubble) addAgentBubble('');
+  rawBuf+=chunk; lastAgentBubble.textContent=rawBuf; scrollAgentBottom();
+}
+
+function finaliseAgentBubble(){
+  if(!lastAgentBubble) return;
+  lastAgentBubble.innerHTML=renderMd(rawBuf);
+  lastAgentBubble=null; rawBuf=''; scrollAgentBottom();
+}
+
+function addAgentSystem(t,isErr=false){
+  const m=document.getElementById('agentMessages');
+  const d=document.createElement('div');
+  d.style.cssText=`text-align:center;font-size:.8rem;color:${isErr?'var(--danger)':'var(--muted)'};padding:4px 0;`;
+  d.textContent=t; m.appendChild(d); scrollAgentBottom();
+}
+
+function scrollAgentBottom(){ const m=document.getElementById('agentMessages'); m.scrollTop=m.scrollHeight; }
+function setAgentThinking(v){ document.getElementById('agentThinking').style.display=v?'flex':'none'; }
+function disableAgentInput(){ document.getElementById('agentSendBtn').disabled=true; document.getElementById('agentPrompt').disabled=true; }
+function enableAgentInput(){ document.getElementById('agentSendBtn').disabled=false; const ta=document.getElementById('agentPrompt'); ta.disabled=false; ta.focus(); }
+
+// ── Context ring ──
+const AGENT_CTX_CIRC = 62.83;
+function updateAgentCtxRing(d){
+  const pct = d.pct || 0;
+  const color = pct < 50 ? '#2ea87f' : pct < 75 ? '#FF8C00' : pct < 90 ? '#FF6200' : '#CC0000';
+  const arc = document.getElementById('agentCtxArc');
+  if(arc){
+    arc.style.stroke = color;
+    arc.setAttribute('stroke-dashoffset', (AGENT_CTX_CIRC * (1 - pct/100)).toFixed(2));
+  }
+  const fmt = n => n >= 1000 ? (n/1000).toFixed(1)+'K' : String(n);
+  const el  = id => document.getElementById(id);
+  if(el('agentCtxPct'))        el('agentCtxPct').textContent        = pct+'%';
+  if(el('agentCtxBar'))        { el('agentCtxBar').style.width = pct+'%'; el('agentCtxBar').style.background = color; }
+  if(el('agentCtxTokenLabel')) el('agentCtxTokenLabel').textContent = fmt(d.used)+' / '+fmt(d.limit)+' tokens';
+  if(el('agentCtxSys'))        el('agentCtxSys').textContent   = d.system   ? fmt(d.system)   : '—';
+  if(el('agentCtxMsgs'))       el('agentCtxMsgs').textContent  = d.messages ? fmt(d.messages) : '—';
+  if(el('agentCtxTools') && d.tools > 0){
+    el('agentCtxToolRow').style.display = '';
+    el('agentCtxTools').textContent = fmt(d.tools);
+  }
+  if(el('agentCtxWarn'))       el('agentCtxWarn').style.display = pct >= 75 ? '' : 'none';
+}
+
+// ── Init ──
+async function init(){
+  await loadAgents();
+  // Auto-select agent passed as ?agent=<name> query param (e.g. after creation)
+  const params = new URLSearchParams(window.location.search);
+  const agentParam = params.get('agent');
+  if(agentParam){
+    const sel = document.getElementById('agentsSelect');
+    if([...sel.options].some(o=>o.value===agentParam)){
+      sel.value = agentParam;
+      await selectAgent(agentParam);
+      // Clean the URL without triggering a reload
+      history.replaceState(null,'','/agents');
+    }
+  }
+}
+init();
+</script>
+{% endblock %}

@@ -1,0 +1,5 @@
+{
+  "provider": "github_copilot",
+  "model": "gpt-5-mini",
+  "description": "Tu es un agent de revue de propositions commerciales (propals). R\u00e9ponds toujours en fran\u00e7ais."
+}

@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Create Agent — AvaSwarm{% endblock %}
+{% set back_url = "/agents" %}
+
+{% block content %}
+<div class="ca-page">
+  <div class="ca-modal">
+
+    <!-- Header -->
+    <div class="ca-modal-hd">
+      <div>
+        <h2 class="ca-modal-title">Create agent</h2>
+        <p class="ca-modal-desc">Configure a persistent sub-agent with its own memory, documents and chat.</p>
+      </div>
+      <a href="/agents" class="ca-modal-x" aria-label="Close">&#10005;</a>
+    </div>
+
+    <!-- Body -->
+    <form id="createAgentForm" class="ca-modal-bd" autocomplete="off">
+
+      <!-- Agent name -->
+      <div class="ca-field">
+        <div class="ca-field-hd">Agent name</div>
+        <div class="ca-field-sub">This will appear in the agents dropdown. Use letters, digits or hyphens only.</div>
+        <input id="agentName" class="ca-finput" type="text"
+               placeholder="e.g. research-assistant"
+               pattern="[\w\-]+" required autocomplete="off" spellcheck="false"/>
+        <div id="nameError" class="ca-field-err" hidden></div>
+      </div>
+
+      <!-- Description -->
+      <div class="ca-field">
+        <div class="ca-field-hd">Description</div>
+        <div class="ca-field-sub">Describe the project. This helps both you and the agent understand the project context.</div>
+        <textarea id="agentDescription" class="ca-ta" rows="4"
+                  placeholder="An intelligent automation system that processes data from multiple sources…"></textarea>
+      </div>
+
+      <!-- Instructions -->
+      <div class="ca-field">
+        <div class="ca-field-hd">Instructions</div>
+        <div class="ca-field-sub">Provide specific instructions for the agent. These are injected into the system prompt and saved to <code>agent.md</code>.</div>
+        <textarea id="agentInstructions" class="ca-ta ca-ta--code" rows="14"
+                  placeholder="## Your Role&#10;You are an expert…"></textarea>
+      </div>
+
+      <!-- Footer -->
+      <div class="ca-modal-ft">
+        <a href="/agents" class="btn btn-secondary">Cancel</a>
+        <button type="submit" class="btn btn-primary" id="submitBtn">Create agent</button>
+      </div>
+
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const form      = document.getElementById('createAgentForm');
+const nameInput = document.getElementById('agentName');
+const nameError = document.getElementById('nameError');
+const submitBtn = document.getElementById('submitBtn');
+
+function setError(msg){
+  nameError.textContent = msg;
+  nameError.hidden = !msg;
+  nameInput.style.borderColor = msg ? 'var(--danger)' : '';
+}
+
+nameInput.addEventListener('input', () => setError(''));
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  setError('');
+  const name         = nameInput.value.trim();
+  const description  = document.getElementById('agentDescription').value.trim();
+  const instructions = document.getElementById('agentInstructions').value.trim();
+  if (!name) { setError('Agent name is required.'); nameInput.focus(); return; }
+  if (!/^[\w\-]+$/.test(name)) { setError('Letters, digits, hyphens or underscores only.'); nameInput.focus(); return; }
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Creating…';
+  try {
+    const r = await fetch('/api/agents', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name, description, instructions })
+    }).then(r => r.json());
+    if (r.ok) {
+      window.location.href = '/agents?agent=' + encodeURIComponent(name);
+    } else {
+      setError(r.error || 'Unknown error');
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Create agent';
+    }
+  } catch (err) {
+    setError('Network error — please try again.');
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Create agent';
+  }
+});
+
+nameInput.focus();
+</script>
+{% endblock %}

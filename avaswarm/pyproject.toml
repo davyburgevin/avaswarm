@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "project-swarm"
+version = "0.1.0"
+description = "Orchestration agent capable of spawning and managing sub-agents across multiple platforms and LLM providers"
+requires-python = ">=3.11"
+dependencies = [
+    # Core LLM providers
+    "openai>=1.30.0",
+    "anthropic>=0.28.0",
+    "httpx>=0.27.0",
+    # Web gateway
+    "fastapi>=0.111.0",
+    "uvicorn[standard]>=0.30.0",
+    "websockets>=12.0",
+    "jinja2>=3.1.4",
+    "python-multipart>=0.0.9",
+    # Email gateway
+    "aiosmtplib>=3.0.0",
+    "aiosmtpd>=1.4.5",
+    "python-dotenv>=1.0.1",
+    # Scheduler
+    "apscheduler>=3.10.4",
+    # Memory / storage
+    "aiofiles>=23.2.1",
+    # Web search
+    "httpx>=0.27.0",
+    # CLI
+    "rich>=13.7.1",
+    "prompt_toolkit>=3.0.47",
+    # Utilities
+    "pydantic>=2.7.0",
+    "pydantic-settings>=2.3.0",
+    "typing-extensions>=4.11.0",
+    "python-dateutil>=2.9.0",
+]
+
+[project.scripts]
+swarm = "swarm.main:cli_entry"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["swarm*"]

@@ -1,0 +1,8 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^& c:\\\\Users\\\\davy\\.burgevin\\\\AgentsToolkitProjects\\\\project-swarm-V02\\\\\\.venv\\\\Scripts\\\\pip\\.exe show pydantic fastapi uvicorn \\| Select-String \"\\^Name\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}

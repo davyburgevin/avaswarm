@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Swarm — Memory{% endblock %}
+{% set back_url = "/" %}
+
+{% block content %}
+<div class="form-page">
+  <h2>Memory</h2>
+  <p class="subtitle">Long-term knowledge and daily session notes.</p>
+
+  <div class="section-title" style="display:flex;align-items:center;justify-content:space-between">
+    Long-term memory
+    <button class="btn btn-secondary" style="font-size:.78rem;padding:5px 12px" onclick="saveLT()">Save</button>
+  </div>
+  <div class="field">
+    <textarea id="lt-content" style="min-height:180px;font-family:monospace;font-size:.85rem">{{ long_term }}</textarea>
+  </div>
+
+  <div class="section-title" style="display:flex;align-items:center;justify-content:space-between">
+    Daily notes
+    <span style="color:var(--muted);font-size:.8rem">{{ today }}</span>
+  </div>
+  <div class="field">
+    <textarea id="daily-content" style="min-height:220px;font-family:monospace;font-size:.85rem" readonly>{{ daily }}</textarea>
+  </div>
+
+  <div class="section-title">Search memory</div>
+  <div style="display:flex;gap:10px;align-items:center">
+    <input id="grep-input" type="text" placeholder="Keyword…" style="flex:1;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);outline:none"/>
+    <button class="btn btn-secondary" onclick="grepMemory()">Search</button>
+  </div>
+  <div id="grep-results" style="margin-top:14px;font-size:.85rem;color:var(--muted)"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function saveLT(){
+  const content = document.getElementById('lt-content').value;
+  const r = await fetch('/api/memory/longterm', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({content}),
+  });
+  const d = await r.json();
+  showToast(d.ok ? 'Saved' : (d.error||'Error'), d.ok?'ok':'error');
+}
+
+async function grepMemory(){
+  const kw = document.getElementById('grep-input').value.trim();
+  if(!kw) return;
+  const r = await fetch('/api/memory/grep?q='+encodeURIComponent(kw));
+  const d = await r.json();
+  const el = document.getElementById('grep-results');
+  if(!Object.keys(d).length){
+    el.innerHTML = '<em>No results.</em>';
+    return;
+  }
+  let html = '';
+  for(const [f,lines] of Object.entries(d)){
+    html += `<div style="margin-bottom:12px"><strong style="color:var(--accent)">${f}</strong><ul style="list-style:none;padding-left:12px;margin-top:4px">`;
+    lines.forEach(l => { html += `<li style="padding:2px 0;border-left:2px solid var(--border);padding-left:8px">${l}</li>`; });
+    html += '</ul></div>';
+  }
+  el.innerHTML = html;
+}
+
+document.getElementById('grep-input').addEventListener('keydown', e => {
+  if(e.key==='Enter') grepMemory();
+});
+</script>
+{% endblock %}
