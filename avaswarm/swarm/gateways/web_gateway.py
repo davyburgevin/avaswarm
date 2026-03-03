@@ -755,6 +755,13 @@ class WebGateway(BaseGateway):
         except Exception:
             pass
 
+        # The main Swarm agent is an ORCHESTRATOR — it must NOT have direct filesystem
+        # or shell access to prevent cross-agent context leakage (e.g. reading another
+        # agent's documents via read_file).  File/shell tools are available to sub-agents
+        # but scoped to their own directory (see _get_sub_agent below).
+        for _unsafe_tool in ("read_file", "write_file", "list_directory", "shell"):
+            agent.tools._tools.pop(_unsafe_tool, None)
+
         _DEFAULT_AGENT_INSTRUCTIONS = (
             "You are a persistent sub-agent. "
             "You have your own memory and documents. "
@@ -796,6 +803,15 @@ class WebGateway(BaseGateway):
                     memory_manager=mem,
                     system_prompt=instructions,
                 )
+                # Sandbox file tools: sub-agent can only read/write within its own directory
+                _agent_root = target.resolve()
+                for _ft in ("read_file", "write_file", "list_directory"):
+                    try:
+                        sub.tools.get(_ft)._root_dir = _agent_root
+                    except KeyError:
+                        pass
+                # Sub-agents don't need shell access
+                sub.tools._tools.pop("shell", None)
                 _sub_agent_cache[name] = sub
             return _sub_agent_cache[name]
 
@@ -1106,7 +1122,6 @@ class WebGateway(BaseGateway):
         @app.websocket("/ws/{session_id}")
         async def ws_chat(websocket: WebSocket, session_id: str):
             await websocket.accept()
-            # Use new_session so long-term memory is always injected into the system prompt
             existing = agent.sessions.get(session_id)
             if existing:
                 sess = existing
@@ -1118,12 +1133,11 @@ class WebGateway(BaseGateway):
                     message = data.get("message", "")
                     if not message:
                         continue
-                    await websocket.send_json({"type": "start"})
+                    await websocket.send_json({"type": "thinking_start"})
                     try:
-                        async for chunk in agent.stream_chat(message, sess):
-                            await websocket.send_json({"type": "chunk", "text": chunk})
+                        async for event in agent.chat_and_stream(message, sess):
+                            await websocket.send_json(event)
                         await websocket.send_json({"type": "end"})
-                        # context usage stats
                         ctx = sess.token_stats(model=agent.model, limit=agent.context_window)
                         await websocket.send_json({"type": "ctx", **ctx})
                     except Exception as exc:

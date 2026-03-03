@@ -67,7 +67,6 @@
 {% block scripts %}
 <script>
 // ---- State ----
-// Persist session id so returning to the chat keeps the same session
 let SESSION_ID = localStorage.getItem('ava_session_id');
 if(!SESSION_ID){
   SESSION_ID = crypto.randomUUID();
@@ -75,6 +74,77 @@ if(!SESSION_ID){
 }
 let ws = null;
 let isStreaming = false;
+
+// ---- Tool-steps state ----
+let _toolStepsDiv  = null;
+let _pendingSteps  = [];
+let _thinkingStart = 0;
+let _thinkingTextEl  = null;
+let _thinkingTextBuf = '';
+let _toolCount = 0;
+
+function _resetToolSteps(){
+  _toolStepsDiv = null;
+  _pendingSteps = [];
+  _thinkingStart = 0;
+  _thinkingTextEl = null;
+  _thinkingTextBuf = '';
+  _toolCount = 0;
+}
+
+function _ensureThinkingBlock(){
+  if(_toolStepsDiv) return;
+  _thinkingStart = Date.now();
+  _toolStepsDiv = document.createElement('div');
+  _toolStepsDiv.className = 'tool-steps';
+  _toolStepsDiv.innerHTML =
+    `<details open>
+      <summary>
+        <svg class="ts-spinner" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+        </svg>
+        <span class="ts-label">R\u00e9flexion\u2026</span>
+      </summary>
+      <div class="ts-text"></div>
+      <div class="ts-steps"></div>
+    </details>`;
+  document.getElementById('messages').appendChild(_toolStepsDiv);
+  _thinkingTextEl = _toolStepsDiv.querySelector('.ts-text');
+  scrollBottom();
+}
+
+function _appendThinkingText(text){
+  _ensureThinkingBlock();
+  _thinkingTextEl.textContent += text;
+  _thinkingTextEl.scrollTop = _thinkingTextEl.scrollHeight;
+  scrollBottom();
+}
+
+function _addToolCallStep(name){
+  _ensureThinkingBlock();
+  _toolCount++;
+  const label = _toolStepsDiv.querySelector('.ts-label');
+  if(label) label.textContent = 'Utilisation des outils\u2026';
+  const step = document.createElement('div');
+  step.className = 'tool-step pending';
+  step.innerHTML = `<span class="ts-check">&#8635;</span><span class="ts-name">${escHtml(name)}</span>`;
+  _toolStepsDiv.querySelector('.ts-steps').appendChild(step);
+  _pendingSteps.push(step);
+  scrollBottom();
+}
+
+function _resolveToolStep(result, ok){
+  const step = _pendingSteps.shift();
+  if(!step) return;
+  step.classList.remove('pending');
+  step.classList.add(ok ? 'done' : 'error');
+  step.querySelector('.ts-check').textContent = ok ? '\u2713' : '\u2717';
+  const res = document.createElement('span');
+  res.className = 'ts-result';
+  res.textContent = '\u2192 ' + result;
+  step.appendChild(res);
+  scrollBottom();
+}
 
 document.getElementById('session-display').textContent = SESSION_ID.slice(0,8)+'…';
 
@@ -86,21 +156,41 @@ function connect(){
 
   ws.onmessage = (e) => {
     const data = JSON.parse(e.data);
-    if(data.type === 'start'){
-      isStreaming = true;
-      setThinking(false);
-      addAgentBubble('');
-    } else if(data.type === 'chunk'){
-      appendToLastBubble(data.text);
-    } else if(data.type === 'end'){
+    if(data.type === 'thinking_start'){
+      if(!_toolStepsDiv) _ensureThinkingBlock();
+    } else if(data.type === 'thinking_text'){
+      _thinkingTextBuf += data.text;
+      _appendThinkingText(data.text);
+    } else if(data.type === 'tool_call'){
+      _thinkingTextBuf = '';
+      _addToolCallStep(data.name);
+    } else if(data.type === 'tool_result'){
+      _resolveToolStep(data.result, data.ok);
+    } else if(data.type === 'final'){
       isStreaming = false;
+      setThinking(false);
+      if(_toolStepsDiv){
+        const details = _toolStepsDiv.querySelector('details');
+        details.setAttribute('data-done','');
+        details.removeAttribute('open');
+        const ms = Date.now() - _thinkingStart;
+        const label = details.querySelector('.ts-label');
+        if(data.had_tools){
+          if(label) label.textContent = 'Utilis\u00e9 '+_toolCount+' outil'+(_toolCount===1?'':'s')+' \u2014 '+ms+'ms';
+        } else {
+          if(label) label.textContent = 'R\u00e9flexion \u2014 '+ms+'ms';
+        }
+      }
+      addAgentBubble(_thinkingTextBuf);
       finaliseLastBubble();
-      enableInput();
+    } else if(data.type === 'end'){
+      _resetToolSteps(); enableInput();
     } else if(data.type === 'ctx'){
       updateCtxRing(data);
     } else if(data.type === 'error'){
       isStreaming = false;
       setThinking(false);
+      _resetToolSteps();
       const detail = data.detail ? '\n\n' + data.detail.split('\n').slice(-4).join('\n') : '';
       addSystemMsg('Error: ' + data.message + detail, true);
       enableInput();
@@ -125,13 +215,14 @@ function sendMessage(){
   ta.value = '';
   ta.style.height = 'auto';
   disableInput();
-  setThinking(true);
+  isStreaming = true;
+  _resetToolSteps(); _ensureThinkingBlock();
 
   if(ws && ws.readyState === WebSocket.OPEN){
     ws.send(JSON.stringify({message: msg}));
   } else {
-    addSystemMsg('Not connected — retrying…', true);
-    enableInput();
+    addSystemMsg('Not connected — retrying\u2026', true);
+    enableInput(); _resetToolSteps();
   }
 }
 

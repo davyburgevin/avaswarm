@@ -37,6 +37,20 @@ _TOKEN_URL = "https://api.github.com/copilot_internal/v2/token"
 import time as _time
 _SESSION_CACHE: dict[str, tuple[str, float]] = {}  # oauth_token → (session_token, expires_at)
 
+# Persistent HTTP client shared across all provider instances.
+# Reusing one client avoids per-request DNS + TCP + TLS overhead (~300-500 ms).
+_HTTP_CLIENT: httpx.AsyncClient | None = None
+
+async def _get_http_client() -> httpx.AsyncClient:
+    global _HTTP_CLIENT
+    if _HTTP_CLIENT is None or _HTTP_CLIENT.is_closed:
+        _HTTP_CLIENT = httpx.AsyncClient(
+            http2=False,
+            limits=httpx.Limits(max_keepalive_connections=5, max_connections=10, keepalive_expiry=30),
+            timeout=120,
+        )
+    return _HTTP_CLIENT
+
 
 class GitHubCopilotProvider(BaseProvider):
     """
@@ -110,25 +124,25 @@ class GitHubCopilotProvider(BaseProvider):
                 del _SESSION_CACHE[self._oauth_token]
 
         try:
-            async with httpx.AsyncClient() as client:
-                resp = await client.get(
-                    _TOKEN_URL,
-                    headers={
-                        "Authorization": f"token {self._oauth_token}",
-                        "Accept": "application/json",
-                        "User-Agent": "GithubCopilot/1.246.0",
-                        "Editor-Version": "vscode/1.96.0",
-                        "Editor-Plugin-Version": "copilot/1.246.0",
-                    },
-                    timeout=30,
-                )
-                resp.raise_for_status()
-                session_token = resp.json()["token"]
-                # Cache for 55 minutes (tokens are valid ~1h)
-                _SESSION_CACHE[self._oauth_token] = (session_token, _time.time() + 55 * 60)
-                self._session_token = session_token
-                log.debug("Copilot session token obtained via internal exchange (cached)")
-                return session_token, "Bearer"
+            client = await _get_http_client()
+            resp = await client.get(
+                _TOKEN_URL,
+                headers={
+                    "Authorization": f"token {self._oauth_token}",
+                    "Accept": "application/json",
+                    "User-Agent": "GithubCopilot/1.246.0",
+                    "Editor-Version": "vscode/1.96.0",
+                    "Editor-Plugin-Version": "copilot/1.246.0",
+                },
+                timeout=30,
+            )
+            resp.raise_for_status()
+            session_token = resp.json()["token"]
+            # Cache for 55 minutes (tokens are valid ~1h)
+            _SESSION_CACHE[self._oauth_token] = (session_token, _time.time() + 55 * 60)
+            self._session_token = session_token
+            log.debug("Copilot session token obtained via internal exchange (cached)")
+            return session_token, "Bearer"
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code in (401, 403, 404):
                 log.info(
@@ -138,6 +152,26 @@ class GitHubCopilotProvider(BaseProvider):
                 )
                 return self._oauth_token, "Bearer"
             raise
+        except httpx.RemoteProtocolError:
+            # Persistent connection was closed by server; recreate client and retry once
+            global _HTTP_CLIENT
+            _HTTP_CLIENT = None
+            client = await _get_http_client()
+            resp = await client.get(
+                _TOKEN_URL,
+                headers={
+                    "Authorization": f"token {self._oauth_token}",
+                    "Accept": "application/json",
+                    "User-Agent": "GithubCopilot/1.246.0",
+                    "Editor-Version": "vscode/1.96.0",
+                    "Editor-Plugin-Version": "copilot/1.246.0",
+                },
+                timeout=30,
+            )
+            resp.raise_for_status()
+            session_token = resp.json()["token"]
+            _SESSION_CACHE[self._oauth_token] = (session_token, _time.time() + 55 * 60)
+            return session_token, "Bearer"
 
     async def _get_session_token(self) -> str:
         """Legacy helper kept for compatibility; prefer _get_token()."""
@@ -213,13 +247,13 @@ class GitHubCopilotProvider(BaseProvider):
             if request.tools:
                 payload["tools"] = request.tools
                 payload["tool_choice"] = "auto"
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(
-                    f"{_COPILOT_API}/chat/completions",
-                    json=payload,
-                    headers=self._headers(tok, sch),
-                    timeout=120,
-                )
+            client = await _get_http_client()
+            resp = await client.post(
+                f"{_COPILOT_API}/chat/completions",
+                json=payload,
+                headers=self._headers(tok, sch),
+                timeout=120,
+            )
             return resp, payload
 
         log = logging.getLogger(__name__)
@@ -312,52 +346,52 @@ class GitHubCopilotProvider(BaseProvider):
             # tool_calls accumulator: index -> {id, name, arguments_chunks}
             tc_acc: dict[int, dict] = {}
 
-            async with httpx.AsyncClient() as client:
-                async with client.stream(
-                    "POST",
-                    f"{_COPILOT_API}/chat/completions",
-                    json=payload,
-                    headers=self._headers(token, scheme),
-                    timeout=120,
-                ) as resp:
-                    if resp.status_code == 401:
-                        got_401 = True
-                    elif resp.status_code == 403:
-                        body = await resp.aread()
-                        raise ValueError(f"Model not available (403). Body: {body.decode()!r}")
-                    elif resp.status_code == 404:
-                        raise ValueError(f"Model not found (404).")
-                    else:
-                        resp.raise_for_status()
-                        async for line in resp.aiter_lines():
-                            if not line.startswith("data: ") or line == "data: [DONE]":
-                                continue
-                            chunk = json.loads(line[6:])
-                            choices = chunk.get("choices")
-                            if not choices:
-                                continue
-                            delta = choices[0].get("delta", {})
-                            # Yield text immediately
-                            text = delta.get("content") or ""
-                            if text:
-                                yield {"type": "text", "text": text}
-                            # Accumulate tool_calls
-                            for tc_delta in (delta.get("tool_calls") or []):
-                                idx = tc_delta.get("index", 0)
-                                if idx not in tc_acc:
-                                    tc_acc[idx] = {"id": "", "name": "", "args": ""}
-                                tc_acc[idx]["id"] = tc_acc[idx]["id"] or tc_delta.get("id", "")
-                                fn = tc_delta.get("function", {})
-                                tc_acc[idx]["name"] = tc_acc[idx]["name"] or fn.get("name", "")
-                                tc_acc[idx]["args"] += fn.get("arguments", "")
-                        # After stream: emit accumulated tool_calls if any
-                        if tc_acc:
-                            calls = [
-                                {"id": v["id"], "function": {"name": v["name"], "arguments": v["args"]}}
-                                for v in sorted(tc_acc.values(), key=lambda x: list(tc_acc.values()).index(x))
-                            ]
-                            yield {"type": "tool_calls", "calls": calls}
-                        return  # success
+            client = await _get_http_client()
+            async with client.stream(
+                "POST",
+                f"{_COPILOT_API}/chat/completions",
+                json=payload,
+                headers=self._headers(token, scheme),
+                timeout=120,
+            ) as resp:
+                if resp.status_code == 401:
+                    got_401 = True
+                elif resp.status_code == 403:
+                    body = await resp.aread()
+                    raise ValueError(f"Model not available (403). Body: {body.decode()!r}")
+                elif resp.status_code == 404:
+                    raise ValueError(f"Model not found (404).")
+                else:
+                    resp.raise_for_status()
+                    async for line in resp.aiter_lines():
+                        if not line.startswith("data: ") or line == "data: [DONE]":
+                            continue
+                        chunk = json.loads(line[6:])
+                        choices = chunk.get("choices")
+                        if not choices:
+                            continue
+                        delta = choices[0].get("delta", {})
+                        # Yield text immediately
+                        text = delta.get("content") or ""
+                        if text:
+                            yield {"type": "text", "text": text}
+                        # Accumulate tool_calls
+                        for tc_delta in (delta.get("tool_calls") or []):
+                            idx = tc_delta.get("index", 0)
+                            if idx not in tc_acc:
+                                tc_acc[idx] = {"id": "", "name": "", "args": ""}
+                            tc_acc[idx]["id"] = tc_acc[idx]["id"] or tc_delta.get("id", "")
+                            fn = tc_delta.get("function", {})
+                            tc_acc[idx]["name"] = tc_acc[idx]["name"] or fn.get("name", "")
+                            tc_acc[idx]["args"] += fn.get("arguments", "")
+                    # After stream ends: emit accumulated tool_calls if any
+                    if tc_acc:
+                        calls = [
+                            {"id": v["id"], "function": {"name": v["name"], "arguments": v["args"]}}
+                            for v in sorted(tc_acc.values(), key=lambda x: list(tc_acc.values()).index(x))
+                        ]
+                        yield {"type": "tool_calls", "calls": calls}
+                    return  # success
 
             if got_401:
                 if attempt == 0:
@@ -409,41 +443,41 @@ class GitHubCopilotProvider(BaseProvider):
 
         for attempt in range(2):
             got_401 = False
-            async with httpx.AsyncClient() as client:
-                async with client.stream(
-                    "POST",
-                    f"{_COPILOT_API}/chat/completions",
-                    json=payload,
-                    headers=self._headers(token, scheme),
-                    timeout=120,
-                ) as resp:
-                    if resp.status_code == 401:
-                        got_401 = True
-                    elif resp.status_code == 403:
-                        body = await resp.aread()
-                        model_used = payload.get("model", "?")
-                        raise ValueError(
-                            f"Model '{model_used}' is not available on your GitHub Copilot plan (403). "
-                            f"Use the model dropdown in Config to select a valid model. Body: {body.decode()!r}"
-                        )
-                    elif resp.status_code == 404:
-                        model_used = payload.get("model", "?")
-                        raise ValueError(
-                            f"Model '{model_used}' not found on Copilot API (404). "
-                            "Check the model ID via the dropdown in Config."
-                        )
-                    else:
-                        resp.raise_for_status()
-                        async for line in resp.aiter_lines():
-                            if line.startswith("data: ") and line != "data: [DONE]":
-                                chunk = json.loads(line[6:])
-                                choices = chunk.get("choices")
-                                if not choices:
-                                    continue
-                                delta = choices[0].get("delta", {}).get("content", "")
-                                if delta:
-                                    yield delta
-                        return  # success
+            client = await _get_http_client()
+            async with client.stream(
+                "POST",
+                f"{_COPILOT_API}/chat/completions",
+                json=payload,
+                headers=self._headers(token, scheme),
+                timeout=120,
+            ) as resp:
+                if resp.status_code == 401:
+                    got_401 = True
+                elif resp.status_code == 403:
+                    body = await resp.aread()
+                    model_used = payload.get("model", "?")
+                    raise ValueError(
+                        f"Model '{model_used}' is not available on your GitHub Copilot plan (403). "
+                        f"Use the model dropdown in Config to select a valid model. Body: {body.decode()!r}"
+                    )
+                elif resp.status_code == 404:
+                    model_used = payload.get("model", "?")
+                    raise ValueError(
+                        f"Model '{model_used}' not found on Copilot API (404). "
+                        "Check the model ID via the dropdown in Config."
+                    )
+                else:
+                    resp.raise_for_status()
+                    async for line in resp.aiter_lines():
+                        if line.startswith("data: ") and line != "data: [DONE]":
+                            chunk = json.loads(line[6:])
+                            choices = chunk.get("choices")
+                            if not choices:
+                                continue
+                            delta = choices[0].get("delta", {}).get("content", "")
+                            if delta:
+                                yield delta
+                    return  # success
 
             if got_401:
                 if attempt == 0:

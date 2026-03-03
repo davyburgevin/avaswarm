@@ -274,7 +274,22 @@ class Agent:
         After each exchange, ask the LLM to identify facts worth saving to long-term
         memory (name, preferences, etc.) and persist them to MEMORY.md.
         Runs as a background task — does not block the response.
+        Skips the LLM call entirely when no personal-fact keywords are detected.
         """
+        # Quick pre-filter: only call the LLM if the message plausibly contains personal facts.
+        # This avoids a second API call for every casual exchange (e.g. "Bonjour", "Merci").
+        _FACT_MARKERS = (
+            "name", "nom", "appelle", "called", "je suis", "i am", "i'm",
+            "my ", "mon ", "ma ", "mes ", "notre ", "nos ",
+            "job", "rôle", "travaille", "work", "company", "société", "enterprise",
+            "live", "habite", "located", "from ", "viens de",
+            "prefer", "préfère", "like ", "aime ", "hate", "déteste",
+            "birthday", "anniversaire", "age", "âge",
+        )
+        combined = (user_msg + " " + assistant_reply).lower()
+        if not any(marker in combined for marker in _FACT_MARKERS):
+            return  # nothing worth extracting — skip the API call
+
         try:
             existing = await self.memory.read_long_term()
             existing_note = f"\n\nAlready stored:\n{existing}" if existing else ""
